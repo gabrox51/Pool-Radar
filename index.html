@@ -143,6 +143,37 @@ footer a{color:var(--muted)}
 .links a{color:var(--accent);font-weight:600;text-decoration:none}
 .note{color:var(--muted);font-size:12.5px;margin:0}
 .sheet-b > *{flex-shrink:0}
+.tabs{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.tabs button{padding:10px 8px;font-size:14px}
+.sim{display:flex;flex-direction:column;gap:18px}
+.sim > *{flex-shrink:0}
+.fields{display:flex;flex-direction:column;gap:14px}
+.field{display:flex;flex-direction:column;gap:7px}
+.k,.sec{font:600 10.5px/1.2 var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.sec{margin-bottom:8px}
+.ctrls .sec{margin:0;align-self:center}
+.inbox{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:0 12px;min-width:0}
+.inbox:focus-within{border-color:var(--accent)}
+.inbox em{font-style:normal;color:var(--muted);font-size:13px;white-space:nowrap}
+.inbox input{border:0;background:transparent;outline:none;padding:10px 0;width:100%;min-width:0;font:600 16px var(--f-mono)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.presets{display:flex;gap:6px;flex-wrap:wrap}
+.presets .chip{padding:6px 11px;font-size:13px}
+.pricebox{background:var(--surface-2);border-radius:12px;padding:12px 14px;font-size:14px;display:flex;flex-direction:column;gap:4px}
+.msg{color:var(--muted)}
+#simChart{min-height:0}
+.pricebox b{font:600 14px var(--f-mono)}
+.pricebox .lo{color:var(--bad)} .pricebox .hi{color:var(--good)}
+.v.pos{color:var(--good)} .v.neg{color:var(--bad)} .v.acc{color:var(--accent)}
+#simBt{margin-top:10px}
+.bt-sum{font-size:14px;margin:10px 0 0}
+.how{border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13.5px;color:var(--muted)}
+.how summary{cursor:pointer;color:var(--fg);font-weight:600}
+.how p{margin:10px 0 0}
+.how .field{margin-top:12px}
+select#simRef{background:var(--bg)}
+.stats.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+#simBt .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media (max-width:760px){
   .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ctrls{flex-direction:column;align-items:stretch}
@@ -221,7 +252,61 @@ footer a{color:var(--muted)}
   <div class="sheet-b">
     <div class="stats" id="dStats"></div>
     <div class="verdict" id="verdict" hidden></div>
-    <div class="ctrls">
+    <div class="seg tabs" id="viewSeg">
+      <button type="button" data-v="hist" aria-pressed="true">Histórico</button>
+      <button type="button" data-v="sim" aria-pressed="false">Simulador de taxas</button>
+    </div>
+    <div class="sim" id="viewSim" hidden>
+      <div class="fields">
+        <label class="field" for="simCap"><span class="k">Valor investido</span>
+          <span class="inbox"><em>US$</em><input id="simCap" type="text" inputmode="decimal" value="1000" autocomplete="off"></span>
+        </label>
+        <div class="field" id="rangeField"><span class="k">Range de preço</span>
+          <div class="pair">
+            <label class="inbox" for="simDown"><em>Abaixo −</em><input id="simDown" type="text" inputmode="decimal" value="10" autocomplete="off"><em>%</em></label>
+            <label class="inbox" for="simUp"><em>Acima +</em><input id="simUp" type="text" inputmode="decimal" value="10" autocomplete="off"><em>%</em></label>
+          </div>
+          <div class="presets" id="presets">
+            <button type="button" class="chip" data-p="1">±1%</button>
+            <button type="button" class="chip" data-p="5">±5%</button>
+            <button type="button" class="chip" data-p="10">±10%</button>
+            <button type="button" class="chip" data-p="20">±20%</button>
+            <button type="button" class="chip" data-p="50">±50%</button>
+          </div>
+        </div>
+      </div>
+      <div id="simPrice" class="pricebox"></div>
+      <div>
+        <div class="sec">Projeção se o preço ficar dentro do range</div>
+        <div class="stats two" id="simProj"></div>
+      </div>
+      <div id="btWrap">
+        <div class="ctrls"><div class="sec">Backtest: se você tivesse aberto há</div>
+          <div class="seg" id="btSeg">
+            <button type="button" data-d="7" aria-pressed="false">7 dias</button>
+            <button type="button" data-d="30" aria-pressed="true">30 dias</button>
+            <button type="button" data-d="90" aria-pressed="false">90 dias</button>
+          </div>
+        </div>
+        <div id="simBt"></div>
+      </div>
+      <div class="chart" id="simChart"></div>
+      <details class="how">
+        <summary>Como o cálculo é feito</summary>
+        <p>A base é a mediana do APY de taxas do pool nos últimos 30 dias, que representa quanto o LP médio do pool ganhou. Um range mais estreito que o dos outros LPs concentra mais liquidez e ganha mais taxas, mas só enquanto o preço estiver dentro dele. Fora do range a posição não rende nada.</p>
+        <p>O backtest abre a posição centrada no preço do primeiro dia, soma as taxas dos dias em que o preço fechou dentro do range e compara o valor final com simplesmente ter segurado os dois tokens (perda impermanente).</p>
+        <label class="field" for="simRef"><span class="k">Range típico dos outros LPs do pool</span>
+          <select id="simRef">
+            <option value="0.1">±10%</option>
+            <option value="0.25">±25%</option>
+            <option value="0.5" selected>±50%</option>
+            <option value="full">Faixa inteira</option>
+          </select>
+        </label>
+        <p>É uma estimativa com dados diários. Volume, preço e a liquidez dos outros LPs mudam todo dia.</p>
+      </details>
+    </div>
+    <div class="ctrls" id="histCtrls">
       <div class="seg" id="metricSeg">
         <button type="button" data-m="apyBase" aria-pressed="true">APY taxas</button>
         <button type="button" data-m="apy" aria-pressed="false">APY total</button>
@@ -235,7 +320,7 @@ footer a{color:var(--muted)}
       </div>
     </div>
     <div class="chart" id="chart"></div>
-    <p class="note">Um ponto por dia. O APY de taxas é calculado pela DefiLlama a partir do volume real de swaps do pool.</p>
+    <p class="note" id="histNote">Um ponto por dia. O APY de taxas é calculado pela DefiLlama a partir do volume real de swaps do pool.</p>
     <div class="links" id="dLinks"></div>
   </div>
 </section>
@@ -335,6 +420,9 @@ footer a{color:var(--muted)}
     ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
     $("#dLinks").innerHTML = `<a href="https://defillama.com/yields/pool/${encodeURIComponent(p.pool)}" target="_blank" rel="noopener">Ver na DefiLlama ↗</a>`;
     $("#verdict").hidden = true;
+    const isCL = CL_RE.test(p.project);
+    $("#rangeField").hidden = !isCL;
+    setView(state.view || "hist");
     $("#scrim").hidden = false; $("#sheet").hidden = false;
     document.body.style.overflow = "hidden";
     $("#close").focus();
@@ -359,6 +447,7 @@ footer a{color:var(--muted)}
     }
     if (!state.pool || state.pool.pool !== id) return;
     verdict(charts.get(id));
+    if (state.view === "sim") renderSim();
     drawChart();
   }
 
@@ -436,6 +525,194 @@ footer a{color:var(--muted)}
     svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", leave);
   }
 
+  /* ---------- Simulador de taxas ---------- */
+  const sim = { cap: 1000, down: 10, up: 10, days: 30, ref: "0.5" };
+  try { Object.assign(sim, JSON.parse(localStorage.getItem("pr-sim") || "{}")); } catch (e) {}
+  const saveSim = () => { try { localStorage.setItem("pr-sim", JSON.stringify(sim)); } catch (e) {} };
+  const priceCache = new Map();
+  const CHAIN_KEY = { Ethereum: "ethereum", BSC: "bsc", Binance: "bsc", Avalanche: "avax", Polygon: "polygon", Arbitrum: "arbitrum",
+    Optimism: "optimism", Base: "base", Solana: "solana", Gnosis: "xdai", xDai: "xdai", "zkSync Era": "era", "Polygon zkEVM": "polygon_zkevm",
+    Hyperliquid: "hyperliquid", "Hyperliquid L1": "hyperliquid", Sui: "sui", Aptos: "aptos", Sonic: "sonic", Linea: "linea", Scroll: "scroll",
+    Blast: "blast", Mantle: "mantle", Celo: "celo", Unichain: "unichain", Berachain: "berachain", Fantom: "fantom", Cronos: "cronos" };
+  const chainKey = c => CHAIN_KEY[c] || c.toLowerCase().replace(/\s+/g, "_");
+  const dayOf = ms => Math.floor(ms / 864e5);
+  const num = s => { const v = parseFloat(String(s).replace(/\./g, "").replace(",", ".")); return isFinite(v) ? v : NaN; };
+  const numLoose = s => { const v = parseFloat(String(s).replace(",", ".")); return isFinite(v) ? v : NaN; };
+  const fmtPrice = v => !isFinite(v) ? "—" : v >= 1000 ? v.toLocaleString("pt-BR", { maximumFractionDigits: 2 })
+    : v >= 1 ? v.toLocaleString("pt-BR", { maximumFractionDigits: 4 }) : v.toLocaleString("pt-BR", { maximumSignificantDigits: 4 });
+  const usd2 = v => !isFinite(v) ? "—" : (v < 0 ? "−" : "") + "US$ " + Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const signed = v => (v > 0 ? "+" : "") + usd2(v);
+
+  /* Quanto mais liquidez por dólar um range concentra, comparado à faixa inteira (fórmula do Uniswap v3) */
+  function mult(down, up) { const sa = Math.sqrt(Math.max(0, 1 - down)), sb = Math.sqrt(1 + up); return 2 / (2 - sa - 1 / sb); }
+  /* Valor da posição em unidades do token1, para preço p, faixa [pa, pb] e liquidez L */
+  function posValue(p, pa, pb, L) {
+    const sp = Math.sqrt(p), sa = Math.sqrt(pa), sb = Math.sqrt(pb);
+    if (p <= pa) return L * (1 / sa - 1 / sb) * p;
+    if (p >= pb) return L * (sb - sa);
+    return L * (1 / sp - 1 / sb) * p + L * (sp - sa);
+  }
+
+  async function loadPrices(p) {
+    if (priceCache.has(p.pool)) return priceCache.get(p.pool);
+    let res = null;
+    try {
+      const t = p.underlyingTokens || [];
+      if (t.length === 2) {
+        const keys = t.map(a => chainKey(p.chain) + ":" + a);
+        const list = keys.join(",");
+        const [ch, cur] = await Promise.all([
+          fetch(`https://coins.llama.fi/chart/${list}?span=95&period=1d`).then(r => r.json()),
+          fetch(`https://coins.llama.fi/prices/current/${list}`).then(r => r.json())
+        ]);
+        const find = (o, k) => { const e = Object.entries(o?.coins || {}).find(([kk]) => kk.toLowerCase() === k.toLowerCase()); return e && e[1]; };
+        const c0 = find(ch, keys[0]), c1 = find(ch, keys[1]), n0 = find(cur, keys[0]), n1 = find(cur, keys[1]);
+        if (n0?.price && n1?.price) {
+          let series = [];
+          if (c0?.prices && c1?.prices) {
+            const m1 = new Map(c1.prices.map(x => [dayOf(x.timestamp * 1000), x.price]));
+            series = c0.prices.map(x => { const d = dayOf(x.timestamp * 1000), q = m1.get(d); return q ? { d, p: x.price / q, p1: q } : null; }).filter(Boolean);
+          }
+          res = { now: n0.price / n1.price, p1: n1.price, series };
+        }
+      }
+    } catch (e) { res = null; }
+    priceCache.set(p.pool, res);
+    return res;
+  }
+
+  function setView(v) {
+    state.view = v;
+    $("#viewSeg").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v === v)));
+    const isSim = v === "sim";
+    $("#viewSim").hidden = !isSim;
+    ["#histCtrls", "#chart", "#histNote"].forEach(s => $(s).hidden = isSim);
+    if (isSim) renderSim(); else if (state.pool) drawChart();
+  }
+
+  let simToken = 0;
+  async function renderSim() {
+    const p = state.pool; if (!p) return;
+    const my = ++simToken;
+    const isCL = CL_RE.test(p.project);
+    const [s0, s1] = (p.symbol || "").split("-");
+    const cap = Math.max(0, sim.cap);
+    const down = isCL ? Math.min(0.99, Math.max(0.001, sim.down / 100)) : 1;
+    const up = isCL ? Math.max(0.001, sim.up / 100) : Infinity;
+    const refM = sim.ref === "full" ? 1 : mult(+sim.ref, +sim.ref);
+    const myM = isCL ? mult(down, up) : 1;
+    const factor = isCL ? myM / refM : 1;
+
+    const hist = charts.get(p.pool);
+    const recent = (hist || []).slice(-30).map(d => d.apyBase).filter(v => v != null && isFinite(v));
+    const baseApy = recent.length >= 5 ? median(recent) : (p.apyBase || 0);
+    const estApr = baseApy * factor;
+    const perDay = cap * estApr / 100 / 365;
+
+    $("#simProj").innerHTML = [
+      ["Por dia", usd2(perDay), "acc"], ["Por mês (30d)", usd2(perDay * 30), "acc"],
+      ["APY estimado", pct(estApr), "acc"],
+      [isCL ? "Concentração" : "Base usada", isCL ? factor.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "× o LP médio" : pct(baseApy), ""]
+    ].map(([k, v, c]) => `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join("");
+
+    const pb = $("#simPrice"), bt = $("#simBt"), sc = $("#simChart");
+    if (!priceCache.has(p.pool)) { pb.innerHTML = `<span class="msg">Carregando preços dos tokens…</span>`; $("#btWrap").hidden = false; bt.innerHTML = `<div class="skel" style="height:120px"></div>`; sc.innerHTML = ""; }
+    const px = await loadPrices(p);
+    if (my !== simToken || state.pool !== p) return;
+
+    if (!px) {
+      pb.innerHTML = `<span class="msg">Não encontrei o preço dos dois tokens deste pool, então o backtest não está disponível. A projeção de taxas funciona normalmente.</span>`;
+      bt.innerHTML = ""; sc.innerHTML = ""; $("#btWrap").hidden = true; sc.hidden = true; return;
+    }
+    $("#btWrap").hidden = false; sc.hidden = false;
+    const pa = px.now * (1 - down), pbv = px.now * (1 + up);
+    pb.innerHTML = `<div>Preço atual: <b>1 ${esc(s0)} = ${fmtPrice(px.now)} ${esc(s1)}</b></div>` +
+      (isCL ? `<div>Seu range: <b class="lo">${fmtPrice(pa)}</b> até <b class="hi">${fmtPrice(pbv)}</b> ${esc(s1)}</div>` : `<div class="msg">Este pool não usa range: a liquidez cobre todos os preços.</div>`);
+
+    /* Backtest */
+    const apyByDay = new Map((hist || []).map(d => [dayOf(d.t.getTime()), d.apyBase]));
+    const series = px.series.slice(-(sim.days + 1));
+    if (series.length < 3) { bt.innerHTML = `<p class="note">Histórico de preços insuficiente para o backtest.</p>`; sc.innerHTML = ""; return; }
+    const p0 = series[0].p, a = p0 * (1 - down), b = isCL ? p0 * (1 + up) : Infinity;
+    const L = (cap / series[0].p1) / posValue(p0, a, b, 1);
+    const x0 = L * (1 / Math.sqrt(p0) - 1 / Math.sqrt(b)), y0 = L * (Math.sqrt(p0) - Math.sqrt(a));
+    let fees = 0, inDays = 0;
+    const days = series.slice(1);
+    days.forEach(d => {
+      const inR = d.p >= a && d.p <= b;
+      if (!inR) return;
+      inDays++;
+      const apy = apyByDay.get(d.d);
+      fees += cap * ((apy != null && isFinite(apy)) ? apy : baseApy) / 100 / 365 * factor;
+    });
+    const last = series[series.length - 1];
+    const lpEnd = posValue(last.p, a, b, L) * last.p1;
+    const hodlEnd = (x0 * last.p + y0) * last.p1;
+    const il = lpEnd - hodlEnd;
+    const net = lpEnd + fees - cap;
+    const share = inDays / days.length;
+
+    bt.innerHTML = `<div class="stats">
+        <div class="stat"><div class="k">Dias no range</div><div class="v ${share >= .8 ? "pos" : share < .5 ? "neg" : ""}">${inDays} de ${days.length}</div></div>
+        <div class="stat"><div class="k">Taxas ganhas</div><div class="v pos">${usd2(fees)}</div></div>
+        <div class="stat"><div class="k">Perda impermanente</div><div class="v ${il < -0.005 ? "neg" : ""}">${usd2(il)}</div></div>
+        <div class="stat"><div class="k">Resultado total</div><div class="v ${net >= 0 ? "pos" : "neg"}">${signed(net)}</div></div>
+      </div>
+      <p class="bt-sum">Você colocaria ${usd2(cap)} e terminaria com ${usd2(lpEnd + fees)}. Só segurando os dois tokens teria ${usd2(hodlEnd)}.
+      ${isCL && share < 1 ? ` Em ${days.length - inDays} dia${days.length - inDays === 1 ? "" : "s"} o preço saiu do range e a posição não rendeu.` : ""}</p>`;
+    drawPriceChart(series, a, b, isCL, s0, s1);
+  }
+
+  function drawPriceChart(data, a, b, isCL, s0, s1) {
+    const box = $("#simChart");
+    const W = Math.max(280, box.clientWidth || 500), H = 200, L = 56, R = 10, T = 12, B = 26;
+    const ys = data.map(d => d.p);
+    let lo = Math.min(...ys), hi = Math.max(...ys);
+    if (isCL) { lo = Math.min(lo, a); hi = Math.max(hi, b); }
+    const pad = (hi - lo) * 0.08 || hi * 0.05 || 1; lo -= pad; hi += pad;
+    const t0 = data[0].d, t1 = data[data.length - 1].d;
+    const x = d => L + (W - L - R) * ((d - t0) / Math.max(1, t1 - t0));
+    const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    const pts = data.map(d => [x(d.d), y(d.p)]);
+    const line = pts.map((q, i) => (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1)).join("");
+    const ticks = [0, 1, 2, 3].map(i => lo + (hi - lo) * i / 3);
+    const dd = n => new Date(n * 864e5).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+    const band = isCL ? `<rect x="${L}" y="${y(b)}" width="${W - L - R}" height="${Math.max(1, y(a) - y(b))}" fill="var(--chart-fill)"/>
+      <line x1="${L}" x2="${W - R}" y1="${y(b)}" y2="${y(b)}" stroke="var(--good)" stroke-dasharray="4 3"/>
+      <line x1="${L}" x2="${W - R}" y1="${y(a)}" y2="${y(a)}" stroke="var(--bad)" stroke-dasharray="4 3"/>` : "";
+    const dots = data.map((d, i) => i && (d.p < a || d.p > b) ? `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="2.5" fill="var(--bad)"/>` : "").join("");
+    box.innerHTML = `<div class="sec">Preço de ${esc(s0)} em ${esc(s1)} no período${isCL ? " (faixa = seu range)" : ""}</div>
+      <svg viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="Preço do par com o range">
+      ${ticks.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v.toLocaleString("pt-BR", { maximumSignificantDigits: 4 })}</text>`).join("")}
+      ${band}
+      <path d="${line}" fill="none" stroke="var(--fg)" stroke-width="1.6" stroke-linejoin="round"/>
+      ${dots}
+      <text class="axis" x="${L}" y="${H - 6}">${dd(t0)}</text>
+      <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${dd(t1)}</text>
+    </svg>`;
+  }
+
+  $("#viewSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (b) setView(b.dataset.v); });
+  $("#simCap").value = String(sim.cap).replace(".", ",");
+  $("#simDown").value = String(sim.down).replace(".", ",");
+  $("#simUp").value = String(sim.up).replace(".", ",");
+  $("#simRef").value = sim.ref;
+  let simT;
+  const simInput = () => { clearTimeout(simT); simT = setTimeout(() => {
+    const c = num($("#simCap").value), d = numLoose($("#simDown").value), u = numLoose($("#simUp").value);
+    if (isFinite(c)) sim.cap = c; if (isFinite(d) && d > 0) sim.down = d; if (isFinite(u) && u > 0) sim.up = u;
+    saveSim(); renderSim();
+  }, 250); };
+  ["#simCap", "#simDown", "#simUp"].forEach(s => $(s).addEventListener("input", simInput));
+  $("#simRef").addEventListener("change", e => { sim.ref = e.target.value; saveSim(); renderSim(); });
+  $("#presets").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    sim.down = sim.up = +b.dataset.p; $("#simDown").value = $("#simUp").value = b.dataset.p; saveSim(); renderSim();
+  });
+  const syncBt = () => $("#btSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.d === sim.days)));
+  syncBt();
+  $("#btSeg").addEventListener("click", e => { const b = e.target.closest("button"); if (!b) return; sim.days = +b.dataset.d; syncBt(); saveSim(); renderSim(); });
+
   /* ---------- Eventos ---------- */
   let qT;
   $("#q").addEventListener("input", e => { clearTimeout(qT); qT = setTimeout(() => { state.q = e.target.value; state.shown = PAGE; render(); }, 150); });
@@ -465,7 +742,7 @@ footer a{color:var(--muted)}
     const b = e.target.closest("button"); if (!b) return;
     state.range = +b.dataset.r; $("#rangeSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawChart();
   });
-  window.addEventListener("resize", () => { if (state.pool) drawChart(); });
+  window.addEventListener("resize", () => { if (state.pool) (state.view === "sim" ? renderSim() : drawChart()); });
 
   const sortSel = $("#sortSel");
   if (![...sortSel.options].some(o => o.value === state.sort)) {
