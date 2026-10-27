@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Pool Radar</title>
 <meta name="description" content="Pools de liquidez de dezenas de redes e DEXes, com APY, TVL, volume e histórico de APY aberto.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d110f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Pool Radar">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
@@ -44,7 +52,8 @@ header.top{padding-block:22px 10px}
 .brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
 .brand h1{font:800 clamp(26px,5vw,36px)/1 var(--f-display);letter-spacing:-.02em;margin:0}
 .brand h1 span{color:var(--accent)}
-.brand p{margin:0;color:var(--muted);font-size:14px}
+.install{margin-left:auto;align-self:center;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--fg);border-radius:999px;padding:7px 13px;font-weight:600;font-size:13px;cursor:pointer}
+.brand p{flex-basis:100%;margin:0;color:var(--muted);font-size:14px}
 
 .bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
@@ -216,6 +225,10 @@ select#simRef{background:var(--bg)}
 <header class="top wrap">
   <div class="brand">
     <h1>Pool<span>Radar</span></h1>
+    <button class="install" id="installBtn" type="button" hidden>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14"/></svg>
+      Instalar app
+    </button>
     <p>Pools de liquidez em dezenas de redes e DEXes, com histórico de APY aberto.</p>
   </div>
 </header>
@@ -873,6 +886,20 @@ select#simRef{background:var(--bg)}
   }
   sortSel.value = state.sort;
   sortSel.addEventListener("change", () => { state.sort = sortSel.value; save(); render(); });
+
+  /* App instalável: botão "Instalar app" quando o navegador permite */
+  let installEvt = null;
+  window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); installEvt = e; $("#installBtn").hidden = false; });
+  $("#installBtn").addEventListener("click", async () => {
+    if (!installEvt) return;
+    installEvt.prompt();
+    try { await installEvt.userChoice; } catch (e) {}
+    installEvt = null; $("#installBtn").hidden = true;
+  });
+  window.addEventListener("appinstalled", () => { $("#installBtn").hidden = true; });
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+  }
 
   load();
 })();
