@@ -203,6 +203,7 @@ footer a{color:var(--muted)}
 .pricebox .lo{color:var(--bad)} .pricebox .hi{color:var(--good)}
 .v.pos{color:var(--good)} .v.neg{color:var(--bad)} .v.acc{color:var(--accent)}
 #simBt{margin-top:10px}
+#simBt .note{margin-top:8px}
 .bt-sum{font-size:14px;margin:10px 0 0}
 .how{border:1px solid var(--line);border-radius:12px;padding:10px 14px;font-size:13.5px;color:var(--muted)}
 .how summary{cursor:pointer;color:var(--fg);font-weight:600}
@@ -338,7 +339,7 @@ select#simRef{background:var(--bg)}
         <div class="stats two" id="simProj"></div>
       </div>
       <div id="btWrap">
-        <div class="ctrls"><div class="sec">Backtest: se você tivesse aberto há</div>
+        <div class="ctrls"><div class="sec">Se investir hoje, simulando os próximos</div>
           <div class="seg" id="btSeg">
             <button type="button" data-d="7" aria-pressed="false">7 dias</button>
             <button type="button" data-d="30" aria-pressed="true">30 dias</button>
@@ -351,7 +352,7 @@ select#simRef{background:var(--bg)}
       <details class="how">
         <summary>Como o cálculo é feito</summary>
         <p>A base é a mediana do APY de taxas do pool nos últimos 30 dias, que representa quanto o LP médio do pool ganhou. Um range mais estreito que o dos outros LPs concentra mais liquidez e ganha mais taxas, mas só enquanto o preço estiver dentro dele. Fora do range a posição não rende nada.</p>
-        <p>O backtest aplica exatamente o seu range (os preços mín. e máx. mostrados) aos preços dos últimos dias, abre a posição no primeiro dia do período, soma as taxas dos dias em que o preço fechou dentro do range e compara o valor final com simplesmente ter segurado os dois tokens (perda impermanente).</p>
+        <p>A simulação abre a posição hoje, no preço atual e com o seu range. Ela gera 1.000 caminhos possíveis de preço para os próximos dias usando a volatilidade real do par nos últimos 90 dias, sem apostar em alta ou queda. Em cada caminho soma as taxas dos dias em que o preço fica dentro do range e calcula a perda impermanente no fim. Os números mostrados são o cenário do meio, e as faixas cobrem 8 de cada 10 cenários.</p>
         <label class="field" for="simRef"><span class="k">Range típico dos outros LPs do pool</span>
           <select id="simRef">
             <option value="0.1">±10%</option>
@@ -722,7 +723,7 @@ select#simRef{background:var(--bg)}
     if (my !== simToken || state.pool !== p) return;
 
     if (!px) {
-      pb.innerHTML = `<span class="msg">Não encontrei o preço dos dois tokens deste pool, então o backtest não está disponível. A projeção de taxas funciona normalmente.</span>`;
+      pb.innerHTML = `<span class="msg">Não encontrei o preço dos dois tokens deste pool, então a simulação dos próximos dias não está disponível. A projeção de taxas funciona normalmente.</span>`;
       bt.innerHTML = ""; sc.innerHTML = ""; $("#btWrap").hidden = true; sc.hidden = true; $("#pricePair").hidden = true; return;
     }
     $("#btWrap").hidden = false; sc.hidden = false;
@@ -735,71 +736,94 @@ select#simRef{background:var(--bg)}
     pb.innerHTML = `<div>Preço atual: <b>1 ${esc(s0)} = ${fmtPrice(px.now)} ${esc(s1)}</b></div>` +
       (isCL ? `<div>Seu range: <b class="lo">${fmtPrice(pa)}</b> até <b class="hi">${fmtPrice(pbv)}</b> ${esc(s1)}</div>` : `<div class="msg">Este pool parece não usar range: a liquidez cobre todos os preços.</div><button type="button" class="linkbtn" id="forceCL">Este pool tem range? Ativar range</button>`);
 
-    /* Backtest */
-    const apyByDay = new Map((hist || []).map(d => [dayOf(d.t.getTime()), d.apyBase]));
-    const series = px.series.slice(-(sim.days + 1));
-    if (series.length < 3) { bt.innerHTML = `<p class="note">Histórico de preços insuficiente para o backtest.</p>`; sc.innerHTML = ""; return; }
-    /* Usa exatamente o range mostrado (preços de hoje) sobre o histórico de preços */
-    const p0 = series[0].p, a = isCL ? pa : 0, b = isCL ? pbv : Infinity;
-    const L = (cap / series[0].p1) / posValue(p0, a, b, 1);
-    const sa0 = Math.sqrt(a), sb0 = Math.sqrt(b), sp0 = Math.sqrt(Math.min(Math.max(p0, a), b));
-    const x0 = p0 >= b ? 0 : L * (1 / sp0 - 1 / sb0), y0 = p0 <= a ? 0 : L * (sp0 - sa0);
-    const startOut = isCL && (p0 < a || p0 > b);
-    let fees = 0, inDays = 0;
-    const days = series.slice(1);
-    days.forEach(d => {
-      const inR = d.p >= a && d.p <= b;
-      if (!inR) return;
-      inDays++;
-      const apy = apyByDay.get(d.d);
-      fees += cap * ((apy != null && isFinite(apy)) ? apy : baseApy) / 100 / 365 * factor;
-    });
-    const last = series[series.length - 1];
-    const lpEnd = posValue(last.p, a, b, L) * last.p1;
-    const hodlEnd = (x0 * last.p + y0) * last.p1;
-    const il = lpEnd - hodlEnd;
-    const net = lpEnd + fees - cap;
-    const share = inDays / days.length;
+    /* Simulação a partir de hoje: 1.000 cenários de preço com a volatilidade real do par */
+    const hist90 = px.series.slice(-91);
+    const rets = [];
+    for (let i = 1; i < hist90.length; i++) { const r = Math.log(hist90[i].p / hist90[i - 1].p); if (isFinite(r)) rets.push(r); }
+    if (rets.length < 10) { bt.innerHTML = `<p class="note">Histórico de preços insuficiente para simular os próximos dias.</p>`; sc.innerHTML = ""; return; }
+    const mu = rets.reduce((x, y) => x + y, 0) / rets.length;
+    const sigma = Math.max(1e-5, Math.sqrt(rets.reduce((x, r) => x + (r - mu) ** 2, 0) / (rets.length - 1)));
+
+    const H = sim.days, N = 1000;
+    const p0 = px.now, a = isCL ? pa : 0, b = isCL ? pbv : Infinity;
+    const L = (cap / px.p1) / posValue(p0, a, b, 1);
+    const x0 = L * (1 / Math.sqrt(p0) - 1 / Math.sqrt(b)), y0 = L * (Math.sqrt(p0) - Math.sqrt(a));
+    const feeDay = cap * baseApy / 100 / 365 * factor;
+
+    /* Gerador fixo: os números não "pulam" enquanto você digita */
+    let seed = 1234567 + H;
+    const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+    const gauss = () => { let u = 0; while (!u) u = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * rnd()); };
+
+    const byDay = Array.from({ length: H + 1 }, () => new Float64Array(N));
+    const feesA = new Float64Array(N), ilA = new Float64Array(N), inA = new Float64Array(N), edgeA = new Float64Array(N), endA = new Float64Array(N);
+    let everOut = 0, exitSum = 0;
+    for (let k = 0; k < N; k++) {
+      let pp = p0, inD = 0, fees = 0, exitDay = 0;
+      byDay[0][k] = p0;
+      for (let t = 1; t <= H; t++) {
+        pp *= Math.exp(sigma * gauss() - sigma * sigma / 2);
+        byDay[t][k] = pp;
+        if (pp >= a && pp <= b) { inD++; fees += feeDay; } else if (!exitDay) exitDay = t;
+      }
+      if (exitDay) { everOut++; exitSum += exitDay; }
+      const lp = posValue(pp, a, b, L) * px.p1, hodl = (x0 * pp + y0) * px.p1;
+      feesA[k] = fees; ilA[k] = lp - hodl; inA[k] = inD; edgeA[k] = fees + lp - hodl; endA[k] = lp + fees;
+    }
+    const q = (arr, f) => { const s2 = Float64Array.from(arr).sort(); return s2[Math.min(s2.length - 1, Math.max(0, Math.round(f * (s2.length - 1))))]; };
+    const fMed = q(feesA, .5), fLo = q(feesA, .1), fHi = q(feesA, .9);
+    const inMed = Math.round(q(inA, .5)), ilMed = q(ilA, .5), eMed = q(edgeA, .5), eLo = q(edgeA, .1), eHi = q(edgeA, .9);
+    const winPct = Math.round(100 * Array.from(edgeA).filter(v => v > 0).length / N);
+    const outPct = Math.round(100 * everOut / N), avgExit = everOut ? Math.round(exitSum / everOut) : 0;
+    const volDay = sigma * 100;
 
     bt.innerHTML = `<div class="stats">
-        <div class="stat"><div class="k">Dias no range</div><div class="v ${share >= .8 ? "pos" : share < .5 ? "neg" : ""}">${inDays} de ${days.length}</div></div>
-        <div class="stat"><div class="k">Taxas ganhas</div><div class="v pos">${usd2(fees)}</div></div>
-        <div class="stat"><div class="k">Perda impermanente</div><div class="v ${il < -0.005 ? "neg" : ""}">${usd2(il)}</div></div>
-        <div class="stat"><div class="k">Resultado total</div><div class="v ${net >= 0 ? "pos" : "neg"}">${signed(net)}</div></div>
+        <div class="stat"><div class="k">Taxas prováveis</div><div class="v pos">${usd2(fMed)}</div></div>
+        <div class="stat"><div class="k">Dias no range</div><div class="v ${inMed / H >= .8 ? "pos" : inMed / H < .5 ? "neg" : ""}">${inMed} de ${H}</div></div>
+        <div class="stat"><div class="k">Perda impermanente</div><div class="v ${ilMed < -0.005 ? "neg" : ""}">${usd2(ilMed)}</div></div>
+        <div class="stat"><div class="k">Taxas − perda</div><div class="v ${eMed >= 0 ? "pos" : "neg"}">${signed(eMed)}</div></div>
       </div>
-      <p class="bt-sum">Você colocaria ${usd2(cap)} e terminaria com ${usd2(lpEnd + fees)}. Só segurando os dois tokens teria ${usd2(hodlEnd)}.
-      ${isCL && share < 1 ? ` Em ${days.length - inDays} dia${days.length - inDays === 1 ? "" : "s"} o preço ficou fora do range e a posição não rendeu.` : ""}
-      ${startOut ? ` No dia da abertura (${fmtPrice(p0)} ${esc(s1)}) o preço estava fora do seu range, então a posição começaria só com ${p0 < a ? esc(s0) : esc(s1)}.` : ""}</p>`;
-    drawPriceChart(series, a, b, isCL, s0, s1);
+      <p class="bt-sum">Investindo ${usd2(cap)} hoje por ${H} dias, o cenário mais provável rende ${usd2(fMed)} em taxas (entre ${usd2(fLo)} e ${usd2(fHi)} em 8 de cada 10 cenários).
+      ${isCL ? (outPct > 0 ? ` Em ${outPct}% dos cenários o preço sai do range em algum momento${avgExit ? `, em média no dia ${avgExit}` : ""}, e a posição para de render enquanto estiver fora.` : " Em praticamente todos os cenários o preço fica dentro do range.") : ""}
+      Comparado a só segurar os dois tokens, as taxas superam a perda impermanente em ${winPct}% dos cenários (resultado entre ${signed(eLo)} e ${signed(eHi)}).</p>
+      <p class="note">Volatilidade usada: ${volDay.toLocaleString("pt-BR", { maximumFractionDigits: 2 })}% ao dia, medida nos últimos ${rets.length} dias do par. Não é previsão do preço: é a faixa do que costuma acontecer com essa volatilidade.</p>`;
+
+    const fan = byDay.map((arr, t) => ({ t, lo: q(arr, .1), mid: q(arr, .5), hi: q(arr, .9) }));
+    drawFanChart(px.series.slice(-31), fan, a, b, isCL, s0, s1, H);
   }
 
-  function drawPriceChart(data, a, b, isCL, s0, s1) {
+  function drawFanChart(histS, fan, a, b, isCL, s0, s1, Hd) {
     const box = $("#simChart");
-    const W = Math.max(280, box.clientWidth || 500), H = 200, L = 56, R = 10, T = 12, B = 26;
-    const ys = data.map(d => d.p);
-    let lo = Math.min(...ys), hi = Math.max(...ys);
+    const W = Math.max(280, box.clientWidth || 500), H = 210, L = 56, R = 10, T = 12, B = 26;
+    const nh = Math.max(0, histS.length - 1);
+    const vals = histS.map(d => d.p).concat(fan.map(f => f.lo), fan.map(f => f.hi));
+    let lo = Math.min(...vals), hi = Math.max(...vals);
     if (isCL) { lo = Math.min(lo, a); hi = Math.max(hi, b); }
     const pad = (hi - lo) * 0.08 || hi * 0.05 || 1; lo -= pad; hi += pad;
-    const t0 = data[0].d, t1 = data[data.length - 1].d;
-    const x = d => L + (W - L - R) * ((d - t0) / Math.max(1, t1 - t0));
+    const x = t => L + (W - L - R) * ((t + nh) / Math.max(1, nh + Hd));
     const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
-    const pts = data.map(d => [x(d.d), y(d.p)]);
-    const line = pts.map((q, i) => (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1)).join("");
+    const path = pts => pts.map((q, i) => (i ? "L" : "M") + q[0].toFixed(1) + " " + q[1].toFixed(1)).join("");
+    const histLine = path(histS.map((d, i) => [x(i - nh), y(d.p)]));
+    const area = path(fan.map(f => [x(f.t), y(f.hi)]).concat(fan.slice().reverse().map(f => [x(f.t), y(f.lo)]))) + "Z";
+    const mid = path(fan.map(f => [x(f.t), y(f.mid)]));
     const ticks = [0, 1, 2, 3].map(i => lo + (hi - lo) * i / 3);
-    const dd = n => new Date(n * 864e5).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
     const band = isCL ? `<rect x="${L}" y="${y(b)}" width="${W - L - R}" height="${Math.max(1, y(a) - y(b))}" fill="var(--chart-fill)"/>
       <line x1="${L}" x2="${W - R}" y1="${y(b)}" y2="${y(b)}" stroke="var(--good)" stroke-dasharray="4 3"/>
       <line x1="${L}" x2="${W - R}" y1="${y(a)}" y2="${y(a)}" stroke="var(--bad)" stroke-dasharray="4 3"/>` : "";
-    const dots = data.map((d, i) => i && (d.p < a || d.p > b) ? `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="2.5" fill="var(--bad)"/>` : "").join("");
-    box.innerHTML = `<div class="sec">Preço de ${esc(s0)} em ${esc(s1)}${isCL ? " · faixa verde = seu range" : ""}</div>
-      <svg viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="Preço do par com o range">
+    box.innerHTML = `<div class="sec">Preço de ${esc(s0)} em ${esc(s1)} · últimos 30 dias e próximos ${Hd} dias</div>
+      <svg viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="Preço recente e faixa de cenários futuros">
       ${ticks.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v.toLocaleString("pt-BR", { maximumSignificantDigits: 4 })}</text>`).join("")}
       ${band}
-      <path d="${line}" fill="none" stroke="var(--fg)" stroke-width="1.6" stroke-linejoin="round"/>
-      ${dots}
-      <text class="axis" x="${L}" y="${H - 6}">${dd(t0)}</text>
-      <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${dd(t1)}</text>
-    </svg>`;
+      <path d="${area}" fill="var(--fg)" fill-opacity=".12"/>
+      <path d="${mid}" fill="none" stroke="var(--fg)" stroke-width="1.4" stroke-dasharray="5 4" opacity=".75"/>
+      <path d="${histLine}" fill="none" stroke="var(--fg)" stroke-width="1.6" stroke-linejoin="round"/>
+      <line x1="${x(0)}" x2="${x(0)}" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1"/>
+      <circle cx="${x(0)}" cy="${y(fan[0].mid)}" r="3.5" fill="var(--fg)"/>
+      <text class="axis" x="${L}" y="${H - 6}">−30 dias</text>
+      <text class="axis" x="${x(0)}" y="${H - 6}" text-anchor="middle">hoje</text>
+      <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">+${Hd} dias</text>
+    </svg>
+    <p class="note" style="margin-top:6px">Área cinza: onde o preço fica em 8 de cada 10 cenários. Linha tracejada: cenário do meio.</p>`;
   }
 
   $("#simPrice").addEventListener("click", e => {
