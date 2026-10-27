@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pool Radar</title>
+<meta name="description" content="Pools de liquidez de dezenas de redes e DEXes, com APY, TVL, volume e histórico de APY aberto.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: barra de filtros fixa no topo, lista de pools em linhas densas, detalhe abre como painel inferior (celular) ou lateral (desktop) */
+:root{
+  --bg:#f3f5f2; --surface:#ffffff; --surface-2:#e9ede7; --line:#d5dbd2;
+  --fg:#141a16; --muted:#5d685f; --accent:#0f7a5a; --accent-soft:#d4ece2;
+  --reward:#8a5a00; --good:#13804f; --warn:#a76400; --bad:#b3362c;
+  --chart:#0f7a5a; --chart-fill:rgba(15,122,90,.14);
+  --f-display:"Bricolage Grotesque",ui-sans-serif,system-ui,sans-serif;
+  --f-body:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0d110f; --surface:#151b18; --surface-2:#1c2420; --line:#27322c;
+  --fg:#e7ede8; --muted:#8d9a91; --accent:#3fd39d; --accent-soft:#163a2d;
+  --reward:#e3b35a; --good:#4bd18f; --warn:#e7a947; --bad:#ef7a6e;
+  --chart:#3fd39d; --chart-fill:rgba(63,211,157,.16); color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --bg:#0d110f; --surface:#151b18; --surface-2:#1c2420; --line:#27322c;
+  --fg:#e7ede8; --muted:#8d9a91; --accent:#3fd39d; --accent-soft:#163a2d;
+  --reward:#e3b35a; --good:#4bd18f; --warn:#e7a947; --bad:#ef7a6e;
+  --chart:#3fd39d; --chart-fill:rgba(63,211,157,.16); color-scheme:dark;}
+
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 var(--f-body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+header.top{padding-block:22px 10px}
+.brand{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.brand h1{font:800 clamp(26px,5vw,36px)/1 var(--f-display);letter-spacing:-.02em;margin:0}
+.brand h1 span{color:var(--accent)}
+.brand p{margin:0;color:var(--muted);font-size:14px}
+
+.bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.bar .wrap{display:flex;flex-wrap:wrap;gap:8px;padding-block:10px}
+.search{flex:1 1 220px;min-width:0;display:flex;align-items:center;gap:8px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 12px}
+.search input{border:0;background:transparent;outline:none;padding:10px 0;width:100%;min-width:0}
+select{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 10px;flex:0 1 auto;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:8px 13px;cursor:pointer;font-size:14px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--fg)}
+.chip[aria-pressed="true"]::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--accent)}
+
+.meta{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:13px;padding-block:12px 6px}
+.meta b{color:var(--fg);font-weight:600}
+
+/* Lista */
+.head,.row{display:grid;grid-template-columns:minmax(0,2.3fr) 1fr 1fr .9fr .9fr .9fr 1.1fr;gap:12px;align-items:center}
+.head{font:600 11px/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 14px}
+.head button{all:unset;cursor:pointer}
+.head button[aria-sort]{color:var(--fg)}
+.head .r,.row .r{text-align:right}
+.list{display:flex;flex-direction:column;gap:6px}
+.row{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;cursor:pointer;text-align:left;width:100%;transition:border-color .15s}
+.row:hover{border-color:var(--accent)}
+.pool{min-width:0}
+.sym{font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sub{color:var(--muted);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{display:inline-block;font:600 10.5px/1 var(--f-mono);padding:3px 5px;border-radius:5px;background:var(--surface-2);color:var(--muted);margin-left:4px;vertical-align:1px}
+.num{font:400 14px/1.2 var(--f-mono);font-variant-numeric:tabular-nums}
+.apy{font:600 16px/1.1 var(--f-mono);color:var(--accent)}
+.apy small{display:block;font:400 11px/1.3 var(--f-mono);color:var(--muted);margin-top:3px}
+.rw{color:var(--reward)}
+.lbl{display:none}
+
+.more{display:flex;justify-content:center;padding-block:16px 30px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 18px;cursor:pointer;font-weight:600}
+.btn:hover{border-color:var(--accent)}
+.empty,.err{padding:40px 16px;text-align:center;color:var(--muted)}
+.err b{color:var(--bad)}
+.skel{height:62px;border-radius:12px;background:linear-gradient(90deg,var(--surface) 0%,var(--surface-2) 50%,var(--surface) 100%);background-size:200% 100%;animation:sh 1.2s infinite linear;border:1px solid var(--line)}
+@keyframes sh{to{background-position:-200% 0}}
+
+footer{color:var(--muted);font-size:12.5px;padding-block:10px 40px;border-top:1px solid var(--line)}
+footer a{color:var(--muted)}
+
+@media (max-width:760px){
+  .head{display:none}
+  .row{grid-template-columns:1fr 1fr 1fr;row-gap:10px}
+  .pool{grid-column:1 / -1;display:flex;justify-content:space-between;gap:10px;align-items:start}
+  .pool .apy-m{display:block}
+  .c-apy{display:none}
+  .lbl{display:block;font:600 10px/1 var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+  .row .r{text-align:left}
+}
+@media (min-width:761px){.apy-m{display:none}}
+
+/* Painel de detalhe */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20}
+.sheet{position:fixed;z-index:21;background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;overflow:hidden;
+  right:0;top:0;bottom:0;width:min(560px,100%);border-radius:16px 0 0 16px}
+@media (max-width:760px){.sheet{left:0;right:0;top:auto;bottom:0;width:auto;max-height:92vh;border-radius:18px 18px 0 0}}
+.sheet-h{display:flex;justify-content:space-between;align-items:start;gap:12px;padding:18px max(18px,env(safe-area-inset-right,0px)) 12px max(18px,env(safe-area-inset-left,0px));border-bottom:1px solid var(--line)}
+.sheet-h h2{font:800 22px/1.1 var(--f-display);margin:0;letter-spacing:-.01em;word-break:break-word}
+.x{border:1px solid var(--line);background:var(--surface-2);border-radius:999px;width:36px;height:36px;cursor:pointer;flex:none;font-size:18px;line-height:1}
+.sheet-b{overflow:auto;padding:16px max(18px,env(safe-area-inset-right,0px)) calc(24px + env(safe-area-inset-bottom,0px)) max(18px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:18px}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.stat{background:var(--surface);padding:10px 12px;min-width:0}
+.stat .k{font:600 10.5px/1 var(--f-body);letter-spacing:.07em;text-transform:uppercase;color:var(--muted)}
+.stat .v{font:600 16px/1.3 var(--f-mono);margin-top:5px;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface-2)}
+.seg button{border:0;background:transparent;padding:7px 12px;cursor:pointer;font-size:13px;font-weight:600;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface);color:var(--fg);box-shadow:inset 0 -2px 0 var(--accent)}
+.ctrls{display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between}
+.chart{position:relative;min-height:220px}
+.chart svg{display:block;width:100%;height:220px;overflow:visible}
+.chart .axis{fill:var(--muted);font:10.5px var(--f-mono)}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);font:12px/1.35 var(--f-mono);padding:6px 8px;border-radius:7px;white-space:nowrap;transform:translate(-50%,-110%)}
+.verdict{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--surface-2)}
+.pill{flex:none;font:600 11.5px/1 var(--f-body);padding:6px 9px;border-radius:999px;color:#fff}
+.pill.good{background:var(--good)} .pill.warn{background:var(--warn)} .pill.bad{background:var(--bad)}
+:root[data-theme="dark"] .pill, :root:not([data-theme="light"]) .pill{color:#fff}
+.verdict p{margin:0;font-size:14px}
+.links a{color:var(--accent);font-weight:600;text-decoration:none}
+.note{color:var(--muted);font-size:12.5px;margin:0}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}.row{transition:none}}
+</style>
+</head>
+<body>
+
+<header class="top wrap">
+  <div class="brand">
+    <h1>Pool<span>Radar</span></h1>
+    <p>Pools de liquidez em dezenas de redes e DEXes, com histórico de APY aberto.</p>
+  </div>
+</header>
+
+<div class="bar">
+  <div class="wrap">
+    <label class="search" for="q">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Buscar token ou par (ex: SOL-USDC)" autocomplete="off">
+    </label>
+    <select id="chain" aria-label="Rede"><option value="">Todas as redes</option></select>
+    <select id="tvl" aria-label="TVL mínimo">
+      <option value="100000">TVL ≥ $100 mil</option>
+      <option value="1000000" selected>TVL ≥ $1 mi</option>
+      <option value="10000000">TVL ≥ $10 mi</option>
+      <option value="10000">TVL ≥ $10 mil</option>
+    </select>
+    <button class="chip" id="cl" aria-pressed="true" type="button">Liquidez concentrada</button>
+    <button class="chip" id="stable" aria-pressed="false" type="button">Só stablecoins</button>
+    <button class="chip" id="hideOut" aria-pressed="true" type="button">Esconder APY anormal</button>
+  </div>
+</div>
+
+<main class="wrap">
+  <div class="meta"><span id="count">Carregando pools…</span><span id="updated"></span></div>
+  <div class="head" role="row">
+    <span>Pool</span>
+    <span class="r"><button data-sort="apy">APY total</button></span>
+    <span class="r"><button data-sort="apyBase">APY taxas</button></span>
+    <span class="r"><button data-sort="apyBase7d">Média 7D</button></span>
+    <span class="r"><button data-sort="apyMean30d">Média 30D</button></span>
+    <span class="r"><button data-sort="volumeUsd1d">Volume 24h</button></span>
+    <span class="r"><button data-sort="tvlUsd">TVL</button></span>
+  </div>
+  <div class="list" id="list">
+    <div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div>
+  </div>
+  <div class="more"><button class="btn" id="moreBtn" type="button" hidden>Mostrar mais 50</button></div>
+</main>
+
+<footer class="wrap">
+  Dados públicos da <a href="https://defillama.com/yields" target="_blank" rel="noopener">DefiLlama</a>. APY passado não garante APY futuro. Não é recomendação financeira; cripto é volátil e você pode perder tudo.
+</footer>
+
+<div class="scrim" id="scrim" hidden></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
+  <div class="sheet-h">
+    <div><h2 id="dTitle"></h2><div class="sub" id="dSub"></div></div>
+    <button class="x" id="close" type="button" aria-label="Fechar">×</button>
+  </div>
+  <div class="sheet-b">
+    <div class="stats" id="dStats"></div>
+    <div class="verdict" id="verdict" hidden></div>
+    <div class="ctrls">
+      <div class="seg" id="metricSeg">
+        <button type="button" data-m="apyBase" aria-pressed="true">APY taxas</button>
+        <button type="button" data-m="apy" aria-pressed="false">APY total</button>
+        <button type="button" data-m="tvlUsd" aria-pressed="false">TVL</button>
+      </div>
+      <div class="seg" id="rangeSeg">
+        <button type="button" data-r="7" aria-pressed="false">7D</button>
+        <button type="button" data-r="30" aria-pressed="true">30D</button>
+        <button type="button" data-r="90" aria-pressed="false">90D</button>
+        <button type="button" data-r="0" aria-pressed="false">Tudo</button>
+      </div>
+    </div>
+    <div class="chart" id="chart"></div>
+    <p class="note">Um ponto por dia. O APY de taxas é calculado pela DefiLlama a partir do volume real de swaps do pool.</p>
+    <div class="links" id="dLinks"></div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const API = "https://yields.llama.fi";
+  const PAGE = 50;
+  const CL_RE = /(v3|v4|clmm|dlmm|slipstream|whirlpool|orca|concentrated|algebra|elastic|maverick|liquidity-book|joe-v2|-cl\b|ramses|pharaoh|thena-fusion|quickswap-dex)/i;
+
+  const $ = s => document.querySelector(s);
+  const state = { all: [], shown: PAGE, sort: "apy", q: "", chain: "", tvl: 1e6, cl: true, stable: false, hideOut: true,
+                  pool: null, metric: "apyBase", range: 30 };
+  const charts = new Map();
+
+  const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 });
+  const pct = v => v == null || !isFinite(v) ? "—" : (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("pt-BR") : v.toLocaleString("pt-BR", { maximumFractionDigits: 2, minimumFractionDigits: 2 })) + "%";
+  const usd = v => v == null || !isFinite(v) ? "—" : money.format(v);
+  const pretty = s => (s || "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+  try { const saved = JSON.parse(localStorage.getItem("pr-filters") || "{}"); Object.assign(state, saved); } catch (e) {}
+  function save() {
+    try { localStorage.setItem("pr-filters", JSON.stringify({ sort: state.sort, chain: state.chain, tvl: state.tvl, cl: state.cl, stable: state.stable, hideOut: state.hideOut })); } catch (e) {}
+  }
+
+  async function load() {
+    try {
+      const r = await fetch(API + "/pools");
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      state.all = (j.data || []).filter(p => p.exposure === "multi" && p.tvlUsd > 0);
+      const counts = {};
+      state.all.forEach(p => counts[p.chain] = (counts[p.chain] || 0) + 1);
+      const sel = $("#chain");
+      Object.entries(counts).sort((a, b) => b[1] - a[1]).forEach(([c, n]) => {
+        const o = document.createElement("option"); o.value = c; o.textContent = `${c} (${n})`; sel.appendChild(o);
+      });
+      sel.value = state.chain;
+      $("#updated").textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      render();
+    } catch (e) {
+      $("#list").innerHTML = `<div class="err"><b>Não foi possível carregar os pools.</b><br>Verifique sua conexão e recarregue a página. (${esc(e.message)})</div>`;
+      $("#count").textContent = "Sem dados";
+    }
+  }
+
+  function filtered() {
+    const q = state.q.trim().toUpperCase().replace(/[\s/]+/g, "-");
+    let rows = state.all.filter(p =>
+      p.tvlUsd >= state.tvl &&
+      (!state.chain || p.chain === state.chain) &&
+      (!state.cl || CL_RE.test(p.project)) &&
+      (!state.stable || p.stablecoin) &&
+      (!state.hideOut || !p.outlier) &&
+      (!q || p.symbol.toUpperCase().includes(q) || p.project.toUpperCase().includes(q))
+    );
+    const k = state.sort;
+    rows.sort((a, b) => (b[k] ?? -Infinity) - (a[k] ?? -Infinity));
+    return rows;
+  }
+
+  function render() {
+    const rows = filtered();
+    $("#count").innerHTML = `<b>${rows.length.toLocaleString("pt-BR")}</b> pools encontrados`;
+    document.querySelectorAll(".head button").forEach(b => b.dataset.sort === state.sort ? b.setAttribute("aria-sort", "descending") : b.removeAttribute("aria-sort"));
+    const list = $("#list");
+    if (!rows.length) { list.innerHTML = `<div class="empty">Nenhum pool com esses filtros. Tente reduzir o TVL mínimo ou desligar “Liquidez concentrada”.</div>`; $("#moreBtn").hidden = true; return; }
+    list.innerHTML = rows.slice(0, state.shown).map(p => {
+      const fee = p.poolMeta ? `<span class="tag">${esc(p.poolMeta)}</span>` : "";
+      return `<button class="row" type="button" data-id="${esc(p.pool)}">
+        <div class="pool"><div style="min-width:0">
+          <div class="sym">${esc(p.symbol)}${fee}</div>
+          <div class="sub">${esc(pretty(p.project))} · ${esc(p.chain)}</div></div>
+          <div class="apy apy-m r">${pct(p.apy)}${p.apyReward ? `<small class="rw">+${pct(p.apyReward)} recompensas</small>` : ""}</div>
+        </div>
+        <div class="apy r c-apy">${pct(p.apy)}${p.apyReward ? `<small class="rw">+${pct(p.apyReward)} recomp.</small>` : ""}</div>
+        <div class="num r"><span class="lbl">APY taxas</span>${pct(p.apyBase)}</div>
+        <div class="num r"><span class="lbl">Média 7D</span>${pct(p.apyBase7d)}</div>
+        <div class="num r"><span class="lbl">Média 30D</span>${pct(p.apyMean30d)}</div>
+        <div class="num r"><span class="lbl">Volume 24h</span>${usd(p.volumeUsd1d)}</div>
+        <div class="num r"><span class="lbl">TVL</span>${usd(p.tvlUsd)}</div>
+      </button>`;
+    }).join("");
+    $("#moreBtn").hidden = rows.length <= state.shown;
+  }
+
+  /* ---------- Detalhe ---------- */
+  function openPool(id) {
+    const p = state.all.find(x => x.pool === id); if (!p) return;
+    state.pool = p;
+    $("#dTitle").textContent = p.symbol + (p.poolMeta ? " · " + p.poolMeta : "");
+    $("#dSub").textContent = pretty(p.project) + " · " + p.chain;
+    $("#dStats").innerHTML = [
+      ["APY total", pct(p.apy)], ["APY taxas", pct(p.apyBase)], ["Recompensas", pct(p.apyReward)],
+      ["Média 30D", pct(p.apyMean30d)], ["Volume 24h", usd(p.volumeUsd1d)], ["TVL", usd(p.tvlUsd)]
+    ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
+    $("#dLinks").innerHTML = `<a href="https://defillama.com/yields/pool/${encodeURIComponent(p.pool)}" target="_blank" rel="noopener">Ver na DefiLlama ↗</a>`;
+    $("#verdict").hidden = true;
+    $("#scrim").hidden = false; $("#sheet").hidden = false;
+    document.body.style.overflow = "hidden";
+    $("#close").focus();
+    loadChart(p.pool);
+  }
+  function closePool() {
+    $("#scrim").hidden = true; $("#sheet").hidden = true; document.body.style.overflow = ""; state.pool = null;
+  }
+
+  async function loadChart(id) {
+    const box = $("#chart");
+    if (!charts.has(id)) {
+      box.innerHTML = `<div class="skel" style="height:220px"></div>`;
+      try {
+        const r = await fetch(API + "/chart/" + encodeURIComponent(id));
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const j = await r.json();
+        charts.set(id, (j.data || []).map(d => ({ t: new Date(d.timestamp), apy: d.apy, apyBase: d.apyBase, tvlUsd: d.tvlUsd })));
+      } catch (e) {
+        box.innerHTML = `<div class="err"><b>Histórico indisponível.</b><br>Tente abrir o pool de novo em alguns segundos.</div>`; return;
+      }
+    }
+    if (!state.pool || state.pool.pool !== id) return;
+    verdict(charts.get(id));
+    drawChart();
+  }
+
+  function median(a) { const s = [...a].sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
+  function verdict(data) {
+    const el = $("#verdict");
+    const last30 = data.slice(-31, -1).map(d => d.apyBase).filter(v => v != null && isFinite(v));
+    const now = data.length ? data[data.length - 1].apyBase : null;
+    if (last30.length < 5 || now == null) { el.hidden = true; return; }
+    const med = median(last30);
+    let cls, label, text;
+    if (med <= 0.01) { cls = "warn"; label = "Sem base"; text = `O pool quase não gerou taxas nos últimos 30 dias. O APY de hoje (${pct(now)}) não tem histórico que o sustente.`; }
+    else {
+      const ratio = now / med;
+      if (ratio >= 2) { cls = "bad"; label = "Pico"; text = `O APY de taxas de hoje (${pct(now)}) está ${ratio.toFixed(1).replace(".", ",")}× acima da mediana de 30 dias (${pct(med)}). Provavelmente é um pico de um dia.`; }
+      else if (ratio >= 1.35) { cls = "warn"; label = "Acima da média"; text = `Hoje (${pct(now)}) está acima da mediana de 30 dias (${pct(med)}). Pode não se manter.`; }
+      else if (ratio >= 0.65) { cls = "good"; label = "Consistente"; text = `Hoje (${pct(now)}) está em linha com a mediana de 30 dias (${pct(med)}).`; }
+      else { cls = "warn"; label = "Abaixo da média"; text = `Hoje (${pct(now)}) está abaixo da mediana de 30 dias (${pct(med)}). O volume caiu recentemente.`; }
+    }
+    el.innerHTML = `<span class="pill ${cls}">${label}</span><p>${text}</p>`;
+    el.hidden = false;
+  }
+
+  function drawChart() {
+    const box = $("#chart");
+    const all = charts.get(state.pool?.pool); if (!all) return;
+    const m = state.metric;
+    let data = all.filter(d => d[m] != null && isFinite(d[m]));
+    if (state.range) { const cut = Date.now() - state.range * 864e5; data = data.filter(d => d.t.getTime() >= cut); }
+    if (data.length < 2) { box.innerHTML = `<div class="empty">Poucos dados para esse período.</div>`; return; }
+
+    const W = Math.max(280, box.clientWidth || 500), H = 220, L = 52, R = 10, T = 12, B = 26;
+    const ys = data.map(d => d[m]);
+    let lo = Math.min(0, ...ys), hi = Math.max(...ys);
+    if (hi === lo) hi = lo + 1;
+    hi *= 1.08;
+    const t0 = data[0].t.getTime(), t1 = data[data.length - 1].t.getTime();
+    const x = t => L + (W - L - R) * ((t - t0) / Math.max(1, t1 - t0));
+    const y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+    const fmtY = v => m === "tvlUsd" ? usd(v) : (Math.abs(v) >= 100 ? Math.round(v) : +v.toFixed(1)).toLocaleString("pt-BR") + "%";
+    const ticks = [0, 1, 2, 3].map(i => lo + (hi - lo) * i / 3);
+    const pts = data.map(d => [x(d.t.getTime()), y(d[m])]);
+    const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join("");
+    const area = line + `L${pts[pts.length - 1][0].toFixed(1)} ${y(lo)}L${pts[0][0].toFixed(1)} ${y(lo)}Z`;
+    const dfmt = d => d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+    const last = pts[pts.length - 1];
+    box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de ${m === "tvlUsd" ? "TVL" : "APY"}">
+      ${ticks.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${fmtY(v)}</text>`).join("")}
+      <path d="${area}" fill="var(--chart-fill)"/>
+      <path d="${line}" fill="none" stroke="var(--chart)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${last[0]}" cy="${last[1]}" r="4" fill="var(--chart)" stroke="var(--surface)" stroke-width="2"/>
+      <text class="axis" x="${L}" y="${H - 6}">${dfmt(data[0].t)}</text>
+      <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${dfmt(data[data.length - 1].t)}</text>
+      <line id="hl" class="grid" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke-dasharray="3 3" visibility="hidden"/>
+      <circle id="hd" r="4" fill="var(--chart)" visibility="hidden"/>
+      <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="hit"/>
+    </svg><div class="tip" id="tip" hidden></div>`;
+
+    const svg = box.querySelector("svg"), tip = box.querySelector("#tip"), hl = box.querySelector("#hl"), hd = box.querySelector("#hd");
+    const move = ev => {
+      const r = svg.getBoundingClientRect();
+      const px = (ev.clientX - r.left) * (W / r.width);
+      let i = 0, best = Infinity;
+      pts.forEach((p, j) => { const dd = Math.abs(p[0] - px); if (dd < best) { best = dd; i = j; } });
+      const [cx, cy] = pts[i];
+      hl.setAttribute("x1", cx); hl.setAttribute("x2", cx); hl.setAttribute("visibility", "visible");
+      hd.setAttribute("cx", cx); hd.setAttribute("cy", cy); hd.setAttribute("visibility", "visible");
+      tip.hidden = false;
+      tip.style.left = Math.min(Math.max(cx * r.width / W, 60), r.width - 60) + "px";
+      tip.style.top = (cy * r.height / H) + "px";
+      tip.textContent = dfmt(data[i].t) + " · " + (m === "tvlUsd" ? usd(data[i][m]) : pct(data[i][m]));
+    };
+    const leave = () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); };
+    svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", leave);
+  }
+
+  /* ---------- Eventos ---------- */
+  let qT;
+  $("#q").addEventListener("input", e => { clearTimeout(qT); qT = setTimeout(() => { state.q = e.target.value; state.shown = PAGE; render(); }, 150); });
+  $("#chain").addEventListener("change", e => { state.chain = e.target.value; state.shown = PAGE; save(); render(); });
+  $("#tvl").addEventListener("change", e => { state.tvl = +e.target.value; state.shown = PAGE; save(); render(); });
+  ["cl", "stable", "hideOut"].forEach(k => {
+    const b = $("#" + k);
+    b.setAttribute("aria-pressed", String(state[k]));
+    b.addEventListener("click", () => { state[k] = !state[k]; b.setAttribute("aria-pressed", String(state[k])); state.shown = PAGE; save(); render(); });
+  });
+  $("#tvl").value = String(state.tvl);
+  document.querySelectorAll(".head button").forEach(b => b.addEventListener("click", () => { state.sort = b.dataset.sort; save(); render(); }));
+  $("#moreBtn").addEventListener("click", () => { state.shown += PAGE; render(); });
+  $("#list").addEventListener("click", e => { const r = e.target.closest(".row"); if (r) openPool(r.dataset.id); });
+  $("#close").addEventListener("click", closePool);
+  $("#scrim").addEventListener("click", closePool);
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && state.pool) closePool(); });
+  $("#metricSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.metric = b.dataset.m; $("#metricSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawChart();
+  });
+  $("#rangeSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    state.range = +b.dataset.r; $("#rangeSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawChart();
+  });
+  window.addEventListener("resize", () => { if (state.pool) drawChart(); });
+
+  /* Ordenação no celular (sem cabeçalho de colunas) */
+  const sortSel = document.createElement("select");
+  sortSel.id = "sortMobile"; sortSel.setAttribute("aria-label", "Ordenar por");
+  [["apy", "Ordenar: APY total"], ["apyBase", "Ordenar: APY taxas"], ["apyMean30d", "Ordenar: média 30D"], ["volumeUsd1d", "Ordenar: volume 24h"], ["tvlUsd", "Ordenar: TVL"]]
+    .forEach(([v, t]) => { const o = document.createElement("option"); o.value = v; o.textContent = t; sortSel.appendChild(o); });
+  sortSel.value = state.sort;
+  sortSel.addEventListener("change", () => { state.sort = sortSel.value; save(); render(); });
+  $(".bar .wrap").insertBefore(sortSel, $("#cl"));
+
+  load();
+})();
+</script>
+</body>
+</html>
