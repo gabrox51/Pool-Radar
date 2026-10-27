@@ -76,7 +76,7 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
 .tag{display:inline-block;font:600 10.5px/1 var(--f-mono);padding:3px 5px;border-radius:5px;background:var(--surface-2);color:var(--muted);margin-left:4px;vertical-align:1px}
 .num{font:400 14px/1.2 var(--f-mono);font-variant-numeric:tabular-nums}
 .apy{font:600 16px/1.1 var(--f-mono);color:var(--accent)}
-.apy small{display:block;font:400 11px/1.3 var(--f-mono);color:var(--muted);margin-top:3px}
+.apy small{display:block;white-space:normal;overflow-wrap:anywhere;font:400 11px/1.3 var(--f-mono);color:var(--muted);margin-top:3px}
 .rw{color:var(--reward)}
 .lbl{display:none}
 
@@ -97,13 +97,16 @@ footer a{color:var(--muted)}
   .bar{position:static}
   .bar .wrap{flex-direction:column;flex-wrap:nowrap}
   .search{flex:none}
-  .selects{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));width:100%}
-  .selects select{width:100%;padding:9px 6px;font-size:13px}
+  .selects{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));width:100%}
+  .selects select{width:100%;padding:9px 8px;font-size:14px}
   .chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:-16px;padding-inline:16px}
   .chips::-webkit-scrollbar{display:none}
   .chip{padding:7px 12px;font-size:13px}
   .head{display:none}
-  .row{grid-template-columns:1fr 1fr 1fr;row-gap:10px}
+  .row{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:10px}
+  .row > .num{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pool .apy-m{flex:none;max-width:48%}
+  .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .pool{grid-column:1 / -1;display:flex;justify-content:space-between;gap:10px;align-items:start}
   .pool .apy-m{display:block}
   .c-apy{display:none}
@@ -200,6 +203,7 @@ select#simRef{background:var(--bg)}
     </label>
     <div class="selects">
       <select id="chain" aria-label="Rede"><option value="">Todas as redes</option></select>
+      <select id="dex" aria-label="DEX"><option value="">Todas as DEXes</option></select>
       <select id="tvl" aria-label="TVL mínimo">
         <option value="10000">TVL ≥ $10 mil</option>
         <option value="100000">TVL ≥ $100 mil</option>
@@ -332,7 +336,7 @@ select#simRef{background:var(--bg)}
   const CL_RE = /(v3|v4|clmm|dlmm|slipstream|whirlpool|orca|concentrated|algebra|elastic|maverick|liquidity-book|joe-v2|-cl\b|ramses|pharaoh|thena-fusion|quickswap-dex)/i;
 
   const $ = s => document.querySelector(s);
-  const state = { all: [], shown: PAGE, sort: "apy", q: "", chain: "", tvl: 1e6, cl: true, stable: false, hideOut: true,
+  const state = { all: [], shown: PAGE, sort: "apy", q: "", chain: "", dex: "", tvl: 1e6, cl: true, stable: false, hideOut: true,
                   pool: null, metric: "apyBase", range: 30 };
   const charts = new Map();
 
@@ -344,7 +348,7 @@ select#simRef{background:var(--bg)}
 
   try { const saved = JSON.parse(localStorage.getItem("pr-filters") || "{}"); Object.assign(state, saved); } catch (e) {}
   function save() {
-    try { localStorage.setItem("pr-filters", JSON.stringify({ sort: state.sort, chain: state.chain, tvl: state.tvl, cl: state.cl, stable: state.stable, hideOut: state.hideOut })); } catch (e) {}
+    try { localStorage.setItem("pr-filters", JSON.stringify({ sort: state.sort, chain: state.chain, dex: state.dex, tvl: state.tvl, cl: state.cl, stable: state.stable, hideOut: state.hideOut })); } catch (e) {}
   }
 
   async function load() {
@@ -373,6 +377,7 @@ select#simRef{background:var(--bg)}
     let rows = state.all.filter(p =>
       p.tvlUsd >= state.tvl &&
       (!state.chain || p.chain === state.chain) &&
+      (!state.dex || p.project === state.dex) &&
       (!state.cl || CL_RE.test(p.project)) &&
       (!state.stable || p.stablecoin) &&
       (!state.hideOut || !p.outlier) &&
@@ -383,7 +388,26 @@ select#simRef{background:var(--bg)}
     return rows;
   }
 
+  function buildDexOptions() {
+    const counts = {};
+    state.all.forEach(p => {
+      if (p.tvlUsd < state.tvl) return;
+      if (state.chain && p.chain !== state.chain) return;
+      if (state.cl && !CL_RE.test(p.project)) return;
+      if (state.stable && !p.stablecoin) return;
+      if (state.hideOut && p.outlier) return;
+      counts[p.project] = (counts[p.project] || 0) + 1;
+    });
+    if (state.dex && !counts[state.dex]) counts[state.dex] = 0;
+    const sel = $("#dex");
+    sel.innerHTML = `<option value="">Todas as DEXes</option>` + Object.entries(counts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([k, n]) => `<option value="${esc(k)}">${esc(pretty(k))} (${n})</option>`).join("");
+    sel.value = state.dex;
+  }
+
   function render() {
+    if (state.all.length) buildDexOptions();
     const rows = filtered();
     $("#count").innerHTML = `<b>${rows.length.toLocaleString("pt-BR")}</b> pools encontrados`;
     document.querySelectorAll(".head button").forEach(b => b.dataset.sort === state.sort ? b.setAttribute("aria-sort", "descending") : b.removeAttribute("aria-sort"));
@@ -717,6 +741,7 @@ select#simRef{background:var(--bg)}
   let qT;
   $("#q").addEventListener("input", e => { clearTimeout(qT); qT = setTimeout(() => { state.q = e.target.value; state.shown = PAGE; render(); }, 150); });
   $("#chain").addEventListener("change", e => { state.chain = e.target.value; state.shown = PAGE; save(); render(); });
+  $("#dex").addEventListener("change", e => { state.dex = e.target.value; state.shown = PAGE; save(); render(); });
   $("#tvl").addEventListener("change", e => { state.tvl = +e.target.value; state.shown = PAGE; save(); render(); });
   ["cl", "stable", "hideOut"].forEach(k => {
     const b = $("#" + k);
