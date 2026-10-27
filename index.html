@@ -118,6 +118,24 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
   .t5-list::-webkit-scrollbar{display:none}
   .t5,.t5-skel{flex:0 0 min(70vw,250px);scroll-snap-align:start}
 }
+.stocks{padding-block:4px 16px;display:flex;flex-direction:column;gap:10px}
+.stocks .t5-head{margin-bottom:0}
+.st-keys{border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:12px;font-size:14px}
+.st-keys p{margin:0;color:var(--muted)}
+.st-keys .sub{white-space:normal}
+.st-keys a{color:var(--accent)}
+.st-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.st-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
+.st-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:7px 12px}
+.st-row .tk{font:600 14px var(--f-mono)}
+.st-row .nm{color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-row .px{font:400 14px var(--f-mono);font-variant-numeric:tabular-nums;text-align:right}
+.chg{font:600 12.5px var(--f-mono);font-variant-numeric:tabular-nums;padding:4px 7px;border-radius:6px;min-width:4.6em;text-align:right}
+.chg.up{color:var(--good);background:color-mix(in srgb,var(--good) 14%,transparent)}
+.chg.dn{color:var(--bad);background:color-mix(in srgb,var(--bad) 14%,transparent)}
+.chg.fl{color:var(--muted);background:var(--surface-2)}
+.st-empty{border:1px dashed var(--line);border-radius:12px;padding:16px;color:var(--muted);font-size:14px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
+@media (max-width:760px){.st-list{grid-template-columns:minmax(0,1fr)}}
 footer{color:var(--muted);font-size:12.5px;padding-block:10px 40px;border-top:1px solid var(--line)}
 footer a{color:var(--muted)}
 
@@ -242,6 +260,31 @@ select#simRef{background:var(--bg)}
   <div class="t5-list" id="top5">
     <div class="skel t5-skel"></div><div class="skel t5-skel"></div><div class="skel t5-skel"></div>
   </div>
+</section>
+
+<section class="stocks wrap" aria-labelledby="stH">
+  <div class="t5-head">
+    <h2 id="stH">Bolsa hoje</h2>
+    <button class="linkbtn" id="stKeysBtn" type="button">Chaves das cotações</button>
+  </div>
+  <div class="seg tabs" id="stSeg">
+    <button type="button" data-m="b3" aria-pressed="true">Ibovespa · top 10</button>
+    <button type="button" data-m="us" aria-pressed="false">Nasdaq · top 10</button>
+  </div>
+  <div class="st-keys" id="stKeys" hidden>
+    <p>As cotações vêm de dois serviços com plano grátis. Crie uma conta, copie a chave e cole aqui. Ela fica salva só neste aparelho e não vai para o código do site.</p>
+    <label class="field" for="kB3"><span class="k">Token da brapi.dev (Ibovespa)</span>
+      <span class="inbox"><input id="kB3" type="text" autocomplete="off" spellcheck="false" placeholder="cole o token aqui"></span>
+      <span class="sub">Crie em <a href="https://brapi.dev/dashboard" target="_blank" rel="noopener">brapi.dev/dashboard</a></span>
+    </label>
+    <label class="field" for="kUS"><span class="k">Chave da Finnhub (Nasdaq)</span>
+      <span class="inbox"><input id="kUS" type="text" autocomplete="off" spellcheck="false" placeholder="cole a chave aqui"></span>
+      <span class="sub">Crie em <a href="https://finnhub.io/register" target="_blank" rel="noopener">finnhub.io/register</a></span>
+    </label>
+    <div class="st-actions"><button class="btn" id="kSave" type="button">Salvar e atualizar</button><span class="sub" id="kMsg"></span></div>
+  </div>
+  <div id="stBody"></div>
+  <p class="note" id="stNote"></p>
 </section>
 
 <div class="bar">
@@ -912,6 +955,105 @@ select#simRef{background:var(--bg)}
   }
   sortSel.value = state.sort;
   sortSel.addEventListener("change", () => { state.sort = sortSel.value; save(); render(); });
+
+  /* ---------- Bolsa hoje (Ibovespa e Nasdaq) ---------- */
+  /* Maiores pesos no índice (Ibovespa: carteira de 26/10/2026; Nasdaq-100: 30/09/2026). Atualize quando a composição mudar. */
+  const B3_TOP = [["PETR4", "Petrobras PN"], ["ITUB4", "Itaú Unibanco"], ["VALE3", "Vale"], ["PETR3", "Petrobras ON"], ["AXIA3", "Axia Energia"],
+    ["B3SA3", "B3"], ["SBSP3", "Sabesp"], ["BBDC4", "Bradesco"], ["BPAC11", "BTG Pactual"], ["ITSA4", "Itaúsa"]];
+  const US_TOP = [["NVDA", "NVIDIA"], ["AAPL", "Apple"], ["MSFT", "Microsoft"], ["MU", "Micron"], ["AMD", "AMD"],
+    ["AMZN", "Amazon"], ["META", "Meta"], ["GOOGL", "Alphabet A"], ["GOOG", "Alphabet C"], ["TSLA", "Tesla"]];
+  const B3_FREE = new Set(["PETR4", "MGLU3", "VALE3", "ITUB4"]); /* a brapi libera estes sem token */
+  const stState = { mkt: "b3" };
+  const lsGet = k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
+  const lsSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} };
+  const CACHE_MS = 10 * 60 * 1000;
+
+  async function fetchB3(key) {
+    const list = key ? B3_TOP : B3_TOP.filter(([t]) => B3_FREE.has(t));
+    const out = await Promise.all(list.map(async ([t, nm]) => {
+      try {
+        const r = await fetch(`https://brapi.dev/api/quote/${t}` + (key ? `?token=${encodeURIComponent(key)}` : ""));
+        if (!r.ok) return { t, nm, err: r.status };
+        const q = (await r.json()).results?.[0];
+        return q && q.regularMarketPrice != null ? { t, nm, px: q.regularMarketPrice, chg: q.regularMarketChangePercent, cur: "BRL", time: q.regularMarketTime } : { t, nm, err: "vazio" };
+      } catch (e) { return { t, nm, err: "rede" }; }
+    }));
+    return out;
+  }
+  async function fetchUS(key) {
+    return Promise.all(US_TOP.map(async ([t, nm]) => {
+      try {
+        const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${t}&token=${encodeURIComponent(key)}`);
+        if (!r.ok) return { t, nm, err: r.status };
+        const q = await r.json();
+        return q && q.c ? { t, nm, px: q.c, chg: q.dp, cur: "USD", time: q.t ? new Date(q.t * 1000).toISOString() : null } : { t, nm, err: "vazio" };
+      } catch (e) { return { t, nm, err: "rede" }; }
+    }));
+  }
+
+  async function loadStocks(force) {
+    const mkt = stState.mkt, key = lsGet(mkt === "b3" ? "pr-key-b3" : "pr-key-us");
+    const body = $("#stBody"), note = $("#stNote");
+    if (mkt === "us" && !key) {
+      body.innerHTML = `<div class="st-empty">Para ver as 10 maiores da Nasdaq, cole uma chave grátis da Finnhub.<button class="btn" type="button" data-open-keys>Colocar chave</button></div>`;
+      note.textContent = ""; return;
+    }
+    const ck = "pr-st-" + mkt + (key ? "-k" : "");
+    let cached = null; try { cached = JSON.parse(localStorage.getItem(ck) || "null"); } catch (e) {}
+    let rows;
+    if (!force && cached && Date.now() - cached.ts < CACHE_MS) rows = cached.rows;
+    else {
+      body.innerHTML = `<div class="st-list">${"<div class='skel' style='height:52px'></div>".repeat(6)}</div>`;
+      rows = mkt === "b3" ? await fetchB3(key) : await fetchUS(key);
+      if (stState.mkt !== mkt) return;
+      if (rows.some(r => r.px != null)) try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), rows })); } catch (e) {}
+      cached = { ts: Date.now() };
+    }
+    renderStocks(rows, mkt, key, cached.ts);
+  }
+
+  function renderStocks(rows, mkt, key, ts) {
+    const body = $("#stBody"), note = $("#stNote");
+    const ok = rows.filter(r => r.px != null).sort((a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9));
+    const bad = rows.filter(r => r.px == null);
+    const money = (v, c) => v.toLocaleString("pt-BR", { style: "currency", currency: c, minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const chgCell = v => v == null || !isFinite(v) ? `<span class="chg fl">—</span>` :
+      `<span class="chg ${v > 0.005 ? "up" : v < -0.005 ? "dn" : "fl"}">${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>`;
+    let html = ok.length ? `<div class="st-list">${ok.map(r => `<div class="st-row">
+        <div style="min-width:0"><div class="tk">${esc(r.t)}</div><div class="nm">${esc(r.nm)}</div></div>
+        <div class="px">${money(r.px, r.cur)}</div>${chgCell(r.chg)}</div>`).join("")}</div>` : "";
+    if (!ok.length) {
+      const authErr = bad.some(r => r.err === 401 || r.err === 403);
+      html = `<div class="st-empty">${authErr ? "A chave foi recusada pelo serviço. Confira se copiou a chave inteira." : "Não consegui carregar as cotações agora. Tente de novo em alguns minutos."}
+        <button class="btn" type="button" data-open-keys>Revisar chaves</button></div>`;
+    } else if (mkt === "b3" && !key) {
+      html += `<div class="st-empty" style="margin-top:6px">Sem token, a brapi só libera PETR4, ITUB4 e VALE3. Cole um token grátis para ver as 10.<button class="btn" type="button" data-open-keys>Colocar token</button></div>`;
+    }
+    body.innerHTML = html;
+    const t = new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    note.textContent = ok.length ? `Ordenadas pela variação do dia. Buscado às ${t}${mkt === "b3" ? " · a B3 no plano grátis tem atraso de até 30 min" : ""}.` +
+      (bad.length && ok.length ? ` Sem dados agora: ${bad.map(r => r.t).join(", ")}.` : "") : "";
+  }
+
+  function toggleKeys(show) {
+    const box = $("#stKeys");
+    box.hidden = show === undefined ? !box.hidden : !show;
+    if (!box.hidden) { $("#kB3").value = lsGet("pr-key-b3"); $("#kUS").value = lsGet("pr-key-us"); $("#kMsg").textContent = ""; }
+  }
+  $("#stKeysBtn").addEventListener("click", () => toggleKeys());
+  $("#stBody").addEventListener("click", e => { if (e.target.closest("[data-open-keys]")) { toggleKeys(true); $("#stKeys").scrollIntoView({ behavior: "smooth", block: "nearest" }); } });
+  $("#kSave").addEventListener("click", () => {
+    lsSet("pr-key-b3", $("#kB3").value.trim()); lsSet("pr-key-us", $("#kUS").value.trim());
+    $("#kMsg").textContent = "Salvo neste aparelho."; setTimeout(() => toggleKeys(false), 900);
+    loadStocks(true);
+  });
+  $("#stSeg").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    stState.mkt = b.dataset.m;
+    $("#stSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    loadStocks(false);
+  });
+  loadStocks(false);
 
   /* App instalável: botão "Instalar app" quando o navegador permite */
   let installEvt = null;
