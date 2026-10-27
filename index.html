@@ -150,6 +150,25 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
 .tape-msg{padding:8px 14px;color:var(--muted);font-family:var(--f-body);white-space:nowrap}
 @keyframes tape{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){.tape-track{animation:none}.tape-vp{overflow-x:auto}}
+.ic{--sz:22px;position:relative;flex:none;width:var(--sz);height:var(--sz);border-radius:50%;display:inline-grid;place-items:center;overflow:hidden;
+  background:hsl(var(--h) 45% 42%);color:#fff;font:700 calc(var(--sz) * .45)/1 var(--f-body);vertical-align:middle}
+.ic-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--surface)}
+.ic-xs{--sz:14px}
+.ic-stock{--sz:30px;border-radius:8px;background:hsl(var(--h) 35% 40%)}
+.ic-stock .ic-img{object-fit:contain;background:#fff;padding:3px}
+.pair-ic{display:inline-flex;flex:none;align-items:center}
+.pair-ic .ic{--sz:28px;box-shadow:0 0 0 2px var(--surface)}
+.pair-ic .ic + .ic{margin-left:-9px}
+.pair-ic.sm .ic{--sz:22px}
+.pair-ic.lg .ic{--sz:34px;box-shadow:0 0 0 2px var(--surface)}
+.pid{display:flex;align-items:center;gap:10px;min-width:0}
+.chainline{display:inline-flex;align-items:center;gap:5px;vertical-align:middle}
+.tape-it .ic{--sz:18px}
+.tape-it .ic-stock{--sz:18px;border-radius:5px}
+.tape-it .ic-stock .ic-img{padding:1.5px}
+.st-id{display:flex;align-items:center;gap:10px;min-width:0}
+.t5-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.dhead{display:flex;align-items:center;gap:12px;min-width:0}
 footer{color:var(--muted);font-size:12.5px;padding-block:10px 40px;border-top:1px solid var(--line)}
 footer a{color:var(--muted)}
 
@@ -362,7 +381,7 @@ select#simRef{background:var(--bg)}
 <div class="scrim" id="scrim" hidden></div>
 <section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
   <div class="sheet-h">
-    <div><h2 id="dTitle"></h2><div class="sub" id="dSub"></div></div>
+    <div class="dhead"><span id="dIcons"></span><div style="min-width:0"><h2 id="dTitle"></h2><div class="sub" id="dSub"></div></div></div>
     <button class="x" id="close" type="button" aria-label="Fechar">×</button>
   </div>
   <div class="sheet-b">
@@ -467,6 +486,44 @@ select#simRef{background:var(--bg)}
   const pretty = s => (s || "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  /* ---------- Ícones: tenta cada fonte em ordem; se todas falharem, fica o círculo com a inicial ---------- */
+  const CI = s => `https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/${s}.svg`;
+  const LLAMA_CHAIN = c => `https://icons.llamao.fi/icons/chains/rsz_${c}.jpg`;
+  /* tokens embrulhados/pontes usam o ícone do original */
+  const TOKEN_ALIAS = { weth: "eth", steth: "eth", wsteth: "eth", cbeth: "eth", reth: "eth", weeth: "eth", wbtc: "btc", cbbtc: "btc", btcb: "btc", tbtc: "btc",
+    lbtc: "btc", wsol: "sol", jitosol: "sol", msol: "sol", whype: "hype", khype: "hype", wbnb: "bnb", wavax: "avax", wmatic: "matic", pol: "matic",
+    "usdc.e": "usdc", usdbc: "usdc", "usdt.e": "usdt", usdt0: "usdt", "usd₮0": "usdt", wtrx: "trx", wxrp: "xrp", wsui: "sui" };
+  /* moedas cujo melhor ícone é o da própria rede na DefiLlama */
+  const COIN_CHAIN = { hype: "hyperliquid", sui: "sui", ton: "ton", hbar: "hedera", sol: "solana", avax: "avalanche", trx: "tron", eth: "ethereum",
+    bnb: "binance", ada: "cardano", xlm: "stellar", dot: "polkadot", ltc: "litecoin", bch: "bitcoincash", btc: "bitcoin", xrp: "xrpl", doge: "dogechain", s: "sonic", mnt: "mantle", apt: "aptos", near: "near" };
+  const CHAIN_ICON = { "hyperliquid l1": "hyperliquid", bsc: "binance", "zksync era": "zksync%20era", "polygon zkevm": "polygon%20zkevm", xdai: "xdai", gnosis: "xdai" };
+  const hueOf = str => { let h = 0; for (const ch of String(str)) h = (h * 31 + ch.charCodeAt(0)) % 360; return h; };
+  function iconHTML(cands, label, cls = "") {
+    const letter = esc((String(label).replace(/^[^A-Za-z0-9]+/, "")[0] || "?").toUpperCase());
+    const list = cands.filter(Boolean);
+    const img = list.length ? `<img class="ic-img" src="${esc(list[0])}" data-alt="${esc(list.slice(1).join("|"))}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer">` : "";
+    return `<span class="ic ${cls}" style="--h:${hueOf(label)}" aria-hidden="true">${letter}${img}</span>`;
+  }
+  function tokenIcon(sym, cls) {
+    const raw = String(sym || "").toLowerCase().replace(/^\$/, "");
+    const k = TOKEN_ALIAS[raw] || raw;
+    return iconHTML([CI(k), COIN_CHAIN[k] && LLAMA_CHAIN(COIN_CHAIN[k])], sym, cls);
+  }
+  const chainIcon = c => { const k = String(c || "").toLowerCase(); return iconHTML([LLAMA_CHAIN(CHAIN_ICON[k] || k.replace(/\s+/g, "%20"))], c, "ic-xs"); };
+  const pairIcon = (symbol, cls = "") => {
+    const parts = String(symbol || "").split("-").filter(Boolean).slice(0, 2);
+    return `<span class="pair-ic ${cls}">${parts.map(t => tokenIcon(t)).join("")}</span>`;
+  };
+  const stockIcon = (t, mkt) => iconHTML(mkt === "b3"
+    ? [`https://icons.brapi.dev/icons/${t}.svg`, `https://financialmodelingprep.com/image-stock/${t}.SA.png`]
+    : [`https://financialmodelingprep.com/image-stock/${t}.png`], t, "ic-stock");
+  document.addEventListener("error", e => {
+    const img = e.target;
+    if (!(img instanceof HTMLImageElement) || !img.classList.contains("ic-img")) return;
+    const rest = (img.dataset.alt || "").split("|").filter(Boolean);
+    if (rest.length) { img.dataset.alt = rest.slice(1).join("|"); img.src = rest[0]; } else img.remove();
+  }, true);
+
   try { const saved = JSON.parse(localStorage.getItem("pr-filters") || "{}"); Object.assign(state, saved); } catch (e) {}
   function save() {
     try { localStorage.setItem("pr-filters", JSON.stringify({ sort: state.sort, chain: state.chain, dex: state.dex, tvl: state.tvl, cl: state.cl, stable: state.stable, hideOut: state.hideOut })); } catch (e) {}
@@ -521,7 +578,7 @@ select#simRef{background:var(--bg)}
     const box = $("#top5");
     if (!top.length) { box.innerHTML = `<p class="note">Nenhum pool atende aos critérios agora.</p>`; return; }
     box.innerHTML = top.map((p, i) => `<button class="t5" type="button" data-id="${esc(p.pool)}">
-        <span class="rk"><b>#${i + 1}</b> · ${esc(p.chain)}</span>
+        <span class="t5-top"><span class="rk"><b>#${i + 1}</b> · <span class="chainline">${chainIcon(p.chain)}${esc(p.chain)}</span></span>${pairIcon(p.symbol, "sm")}</span>
         <span style="min-width:0"><span class="sym" style="display:block">${esc(p.symbol)}</span><span class="sub" style="display:block">${esc(pretty(p.project))}${p.poolMeta ? " · " + esc(p.poolMeta) : ""}</span></span>
         <span class="big">${pct(p.apyMean30d)}<small>APY médio 30D</small></span>
         <span class="mini"><span>Hoje ${pct(p.apy)}</span><span>TVL ${usd(p.tvlUsd)}</span></span>
@@ -557,9 +614,9 @@ select#simRef{background:var(--bg)}
     list.innerHTML = rows.slice(0, state.shown).map(p => {
       const fee = p.poolMeta ? `<span class="tag">${esc(p.poolMeta)}</span>` : "";
       return `<button class="row" type="button" data-id="${esc(p.pool)}">
-        <div class="pool"><div style="min-width:0">
+        <div class="pool"><div class="pid">${pairIcon(p.symbol)}<div style="min-width:0">
           <div class="sym">${esc(p.symbol)}${fee}</div>
-          <div class="sub">${esc(pretty(p.project))} · ${esc(p.chain)}</div></div>
+          <div class="sub"><span class="chainline">${chainIcon(p.chain)}</span> ${esc(p.chain)} · ${esc(pretty(p.project))}</div></div></div>
           <div class="apy apy-m r">${pct(p.apy)}${p.apyReward ? `<small class="rw">+${pct(p.apyReward)} recompensas</small>` : ""}</div>
         </div>
         <div class="apy r c-apy">${pct(p.apy)}${p.apyReward ? `<small class="rw">+${pct(p.apyReward)} recomp.</small>` : ""}</div>
@@ -578,6 +635,7 @@ select#simRef{background:var(--bg)}
     const p = state.all.find(x => x.pool === id); if (!p) return;
     state.pool = p;
     $("#dTitle").textContent = p.symbol + (p.poolMeta ? " · " + p.poolMeta : "");
+    $("#dIcons").innerHTML = pairIcon(p.symbol, "lg");
     $("#dSub").textContent = pretty(p.project) + " · " + p.chain;
     $("#dStats").innerHTML = [
       ["APY total", pct(p.apy)], ["APY taxas", pct(p.apyBase)], ["Recompensas", pct(p.apyReward)],
@@ -1077,7 +1135,7 @@ select#simRef{background:var(--bg)}
     const chgCell = v => v == null || !isFinite(v) ? `<span class="chg fl">—</span>` :
       `<span class="chg ${v > 0.005 ? "up" : v < -0.005 ? "dn" : "fl"}">${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>`;
     let html = ok.length ? `<div class="st-list">${ok.map(r => `<div class="st-row">
-        <div style="min-width:0"><div class="tk">${esc(r.t)}</div><div class="nm">${esc(r.nm)}</div></div>
+        <div class="st-id">${stockIcon(r.t, mkt)}<div style="min-width:0"><div class="tk">${esc(r.t)}</div><div class="nm">${esc(r.nm)}</div></div></div>
         <div class="px">${money(r.px, r.cur)}</div>${chgCell(r.chg)}</div>`).join("")}</div>` : "";
     if (!ok.length) {
       const authErr = bad.some(r => r.err === 401 || r.err === 403);
@@ -1128,7 +1186,7 @@ select#simRef{background:var(--bg)}
   function fillTape(id, items, emptyMsg) {
     const tr = $(id);
     if (!items.length) { tr.innerHTML = `<span class="tape-msg">${emptyMsg}</span>`; tr.style.animation = "none"; return; }
-    const html = items.map(i => `<span class="tape-it"><b>${esc(i.t)}</b><span class="p">${tapePx(i.px, i.cur)}</span>${tapeChg(i.chg)}</span>`).join("");
+    const html = items.map(i => `<span class="tape-it">${i.mkt ? stockIcon(i.t, i.mkt) : tokenIcon(i.t)}<b>${esc(i.t)}</b><span class="p">${tapePx(i.px, i.cur)}</span>${tapeChg(i.chg)}</span>`).join("");
     tr.style.animation = ""; tr.style.setProperty("--dur", Math.max(25, items.length * 4.5) + "s");
     tr.innerHTML = html + html; /* duas cópias para o loop não ter emenda */
   }
@@ -1151,7 +1209,7 @@ select#simRef{background:var(--bg)}
     const id = mkt === "b3" ? "#tapeB3" : "#tapeUS";
     if (mkt === "us" && !lsGet("pr-key-us")) { fillTape(id, [], "Coloque a chave da Finnhub em “Chaves das cotações”"); return; }
     const res = await getQuotes(mkt, false);
-    const items = res.rows.filter(r => r.px != null).sort((a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9));
+    const items = res.rows.filter(r => r.px != null).sort((a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9)).map(r => ({ ...r, mkt }));
     fillTape(id, items, "Carregando…");
   }
   function loadTape() { loadCryptoTape(); loadStockTape("b3"); loadStockTape("us"); }
