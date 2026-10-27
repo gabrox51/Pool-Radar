@@ -305,7 +305,7 @@ select#simRef{background:var(--bg)}
       <details class="how">
         <summary>Como o cálculo é feito</summary>
         <p>A base é a mediana do APY de taxas do pool nos últimos 30 dias, que representa quanto o LP médio do pool ganhou. Um range mais estreito que o dos outros LPs concentra mais liquidez e ganha mais taxas, mas só enquanto o preço estiver dentro dele. Fora do range a posição não rende nada.</p>
-        <p>O backtest abre a posição centrada no preço do primeiro dia, soma as taxas dos dias em que o preço fechou dentro do range e compara o valor final com simplesmente ter segurado os dois tokens (perda impermanente).</p>
+        <p>O backtest aplica exatamente o seu range (os preços mín. e máx. mostrados) aos preços dos últimos dias, abre a posição no primeiro dia do período, soma as taxas dos dias em que o preço fechou dentro do range e compara o valor final com simplesmente ter segurado os dois tokens (perda impermanente).</p>
         <label class="field" for="simRef"><span class="k">Range típico dos outros LPs do pool</span>
           <select id="simRef">
             <option value="0.1">±10%</option>
@@ -669,9 +669,12 @@ select#simRef{background:var(--bg)}
     const apyByDay = new Map((hist || []).map(d => [dayOf(d.t.getTime()), d.apyBase]));
     const series = px.series.slice(-(sim.days + 1));
     if (series.length < 3) { bt.innerHTML = `<p class="note">Histórico de preços insuficiente para o backtest.</p>`; sc.innerHTML = ""; return; }
-    const p0 = series[0].p, a = p0 * (1 - down), b = isCL ? p0 * (1 + up) : Infinity;
+    /* Usa exatamente o range mostrado (preços de hoje) sobre o histórico de preços */
+    const p0 = series[0].p, a = isCL ? pa : 0, b = isCL ? pbv : Infinity;
     const L = (cap / series[0].p1) / posValue(p0, a, b, 1);
-    const x0 = L * (1 / Math.sqrt(p0) - 1 / Math.sqrt(b)), y0 = L * (Math.sqrt(p0) - Math.sqrt(a));
+    const sa0 = Math.sqrt(a), sb0 = Math.sqrt(b), sp0 = Math.sqrt(Math.min(Math.max(p0, a), b));
+    const x0 = p0 >= b ? 0 : L * (1 / sp0 - 1 / sb0), y0 = p0 <= a ? 0 : L * (sp0 - sa0);
+    const startOut = isCL && (p0 < a || p0 > b);
     let fees = 0, inDays = 0;
     const days = series.slice(1);
     days.forEach(d => {
@@ -695,7 +698,8 @@ select#simRef{background:var(--bg)}
         <div class="stat"><div class="k">Resultado total</div><div class="v ${net >= 0 ? "pos" : "neg"}">${signed(net)}</div></div>
       </div>
       <p class="bt-sum">Você colocaria ${usd2(cap)} e terminaria com ${usd2(lpEnd + fees)}. Só segurando os dois tokens teria ${usd2(hodlEnd)}.
-      ${isCL && share < 1 ? ` Em ${days.length - inDays} dia${days.length - inDays === 1 ? "" : "s"} o preço saiu do range e a posição não rendeu.` : ""}</p>`;
+      ${isCL && share < 1 ? ` Em ${days.length - inDays} dia${days.length - inDays === 1 ? "" : "s"} o preço ficou fora do range e a posição não rendeu.` : ""}
+      ${startOut ? ` No dia da abertura (${fmtPrice(p0)} ${esc(s1)}) o preço estava fora do seu range, então a posição começaria só com ${p0 < a ? esc(s0) : esc(s1)}.` : ""}</p>`;
     drawPriceChart(series, a, b, isCL, s0, s1);
   }
 
@@ -717,7 +721,7 @@ select#simRef{background:var(--bg)}
       <line x1="${L}" x2="${W - R}" y1="${y(b)}" y2="${y(b)}" stroke="var(--good)" stroke-dasharray="4 3"/>
       <line x1="${L}" x2="${W - R}" y1="${y(a)}" y2="${y(a)}" stroke="var(--bad)" stroke-dasharray="4 3"/>` : "";
     const dots = data.map((d, i) => i && (d.p < a || d.p > b) ? `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="2.5" fill="var(--bad)"/>` : "").join("");
-    box.innerHTML = `<div class="sec">Preço de ${esc(s0)} em ${esc(s1)} no período${isCL ? " (faixa = seu range)" : ""}</div>
+    box.innerHTML = `<div class="sec">Preço de ${esc(s0)} em ${esc(s1)}${isCL ? " · faixa verde = seu range" : ""}</div>
       <svg viewBox="0 0 ${W} ${H}" style="height:${H}px" role="img" aria-label="Preço do par com o range">
       ${ticks.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v.toLocaleString("pt-BR", { maximumSignificantDigits: 4 })}</text>`).join("")}
       ${band}
