@@ -236,7 +236,7 @@ select#simRef{background:var(--bg)}
 <section class="top5 wrap" aria-labelledby="t5h">
   <div class="t5-head">
     <h2 id="t5h">Top 5 · últimos 30 dias</h2>
-    <span class="t5-crit">Maior APY médio em 30 dias · TVL acima de US$ 100 mil</span>
+    <span class="t5-crit">Uniswap, Raydium e Orca · maior APY médio em 30 dias · TVL acima de US$ 100 mil</span>
   </div>
   <div class="t5-list" id="top5">
     <div class="skel t5-skel"></div><div class="skel t5-skel"></div><div class="skel t5-skel"></div>
@@ -447,9 +447,11 @@ select#simRef{background:var(--bg)}
     return rows;
   }
 
+  /* Top 5 só considera estas DEXes (todas as versões: Uniswap V2/V3/V4, Raydium AMM/CLMM/CPMM, Orca) */
+  const TOP5_DEX_RE = /^(uniswap|raydium|orca)/i;
   function renderTop5() {
     const top = state.all
-      .filter(p => p.tvlUsd >= 1e5 && !p.outlier && (p.count == null || p.count >= 30) && p.apyMean30d != null && isFinite(p.apyMean30d))
+      .filter(p => TOP5_DEX_RE.test(p.project) && p.tvlUsd >= 1e5 && !p.outlier && (p.count == null || p.count >= 30) && p.apyMean30d != null && isFinite(p.apyMean30d))
       .sort((a, b) => b.apyMean30d - a.apyMean30d)
       .slice(0, 5);
     const box = $("#top5");
