@@ -967,6 +967,16 @@ select#simRef{background:var(--bg)}
   const lsGet = k => { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } };
   const lsSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} };
   const CACHE_MS = 10 * 60 * 1000;
+  /* Link de configuração: ?b3=TOKEN&us=CHAVE salva as chaves neste aparelho e limpa o endereço */
+  try {
+    const qp = new URLSearchParams(location.search);
+    if (qp.has("b3") || qp.has("us")) {
+      if (qp.get("b3")) lsSet("pr-key-b3", qp.get("b3").trim());
+      if (qp.get("us")) lsSet("pr-key-us", qp.get("us").trim());
+      ["pr-st-b3", "pr-st-b3-k", "pr-st-us", "pr-st-us-k"].forEach(k => lsSet(k, ""));
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
+  } catch (e) {}
 
   async function fetchB3(key) {
     const list = key ? B3_TOP : B3_TOP.filter(([t]) => B3_FREE.has(t));
