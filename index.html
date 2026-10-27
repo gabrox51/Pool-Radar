@@ -136,6 +136,20 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
 .chg.fl{color:var(--muted);background:var(--surface-2)}
 .st-empty{border:1px dashed var(--line);border-radius:12px;padding:16px;color:var(--muted);font-size:14px;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 @media (max-width:760px){.st-list{grid-template-columns:minmax(0,1fr)}}
+.tape{background:var(--surface);border-bottom:1px solid var(--line);padding-top:env(safe-area-inset-top,0px);font:500 12.5px/1 var(--f-mono)}
+.tape-row{display:flex;align-items:stretch;border-top:1px solid var(--line)}
+.tape-row:first-child{border-top:0}
+.tape-lbl{flex:none;width:68px;display:flex;align-items:center;padding-left:max(12px,env(safe-area-inset-left,0px));font:700 10px/1 var(--f-body);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);position:relative;z-index:1}
+.tape-vp{flex:1;min-width:0;overflow:hidden;-webkit-mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent);mask-image:linear-gradient(90deg,transparent,#000 16px,#000 calc(100% - 16px),transparent)}
+.tape-track{display:flex;width:max-content;animation:tape var(--dur,60s) linear infinite}
+.tape-vp:hover .tape-track,.tape-vp:active .tape-track{animation-play-state:paused}
+.tape-it{display:inline-flex;align-items:center;gap:7px;padding:8px 14px;white-space:nowrap;border-right:1px solid var(--line)}
+.tape-it b{font-weight:700;color:var(--fg)}
+.tape-it .p{color:var(--muted)}
+.tape-it .up{color:var(--good)} .tape-it .dn{color:var(--bad)} .tape-it .fl{color:var(--muted)}
+.tape-msg{padding:8px 14px;color:var(--muted);font-family:var(--f-body);white-space:nowrap}
+@keyframes tape{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@media (prefers-reduced-motion:reduce){.tape-track{animation:none}.tape-vp{overflow-x:auto}}
 footer{color:var(--muted);font-size:12.5px;padding-block:10px 40px;border-top:1px solid var(--line)}
 footer a{color:var(--muted)}
 
@@ -240,6 +254,12 @@ select#simRef{background:var(--bg)}
 </style>
 </head>
 <body>
+
+<div class="tape" aria-label="Cotações ao vivo">
+  <div class="tape-row"><span class="tape-lbl">Cripto</span><div class="tape-vp"><div class="tape-track" id="tapeCrypto" style="--dur:70s"></div></div></div>
+  <div class="tape-row"><span class="tape-lbl">B3</span><div class="tape-vp"><div class="tape-track" id="tapeB3" style="--dur:55s"></div></div></div>
+  <div class="tape-row"><span class="tape-lbl">Nasdaq</span><div class="tape-vp"><div class="tape-track" id="tapeUS" style="--dur:60s"></div></div></div>
+</div>
 
 <header class="top wrap">
   <div class="brand">
@@ -973,32 +993,67 @@ select#simRef{background:var(--bg)}
     if (qp.has("b3") || qp.has("us")) {
       if (qp.get("b3")) lsSet("pr-key-b3", qp.get("b3").trim());
       if (qp.get("us")) lsSet("pr-key-us", qp.get("us").trim());
-      ["pr-st-b3", "pr-st-b3-k", "pr-st-us", "pr-st-us-k"].forEach(k => lsSet(k, ""));
+      ["pr-q-b3", "pr-q-us"].forEach(k => lsSet(k, ""));
       history.replaceState(null, "", location.pathname + location.hash);
     }
   } catch (e) {}
 
-  async function fetchB3(key) {
-    const list = key ? B3_TOP : B3_TOP.filter(([t]) => B3_FREE.has(t));
-    const out = await Promise.all(list.map(async ([t, nm]) => {
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function quoteB3(t, key) {
+    /* brapi no plano grátis recusa pedidos em rajada: um por vez, com novas tentativas */
+    for (let i = 0; i < 3; i++) {
       try {
         const r = await fetch(`https://brapi.dev/api/quote/${t}` + (key ? `?token=${encodeURIComponent(key)}` : ""));
-        if (!r.ok) return { t, nm, err: r.status };
+        if (r.status === 429 || r.status >= 500) { await sleep(1200 * (i + 1)); continue; }
+        if (!r.ok) return { err: r.status };
         const q = (await r.json()).results?.[0];
-        return q && q.regularMarketPrice != null ? { t, nm, px: q.regularMarketPrice, chg: q.regularMarketChangePercent, cur: "BRL", time: q.regularMarketTime } : { t, nm, err: "vazio" };
-      } catch (e) { return { t, nm, err: "rede" }; }
-    }));
-    return out;
+        return q && q.regularMarketPrice != null ? { px: q.regularMarketPrice, chg: q.regularMarketChangePercent, cur: "BRL" } : { err: "vazio" };
+      } catch (e) { await sleep(1200 * (i + 1)); }
+    }
+    return { err: "limite" };
   }
-  async function fetchUS(key) {
-    return Promise.all(US_TOP.map(async ([t, nm]) => {
+  async function quoteUS(t, key) {
+    for (let i = 0; i < 2; i++) {
       try {
         const r = await fetch(`https://finnhub.io/api/v1/quote?symbol=${t}&token=${encodeURIComponent(key)}`);
-        if (!r.ok) return { t, nm, err: r.status };
+        if (r.status === 429) { await sleep(1500); continue; }
+        if (!r.ok) return { err: r.status };
         const q = await r.json();
-        return q && q.c ? { t, nm, px: q.c, chg: q.dp, cur: "USD", time: q.t ? new Date(q.t * 1000).toISOString() : null } : { t, nm, err: "vazio" };
-      } catch (e) { return { t, nm, err: "rede" }; }
-    }));
+        return q && q.c ? { px: q.c, chg: q.dp, cur: "USD" } : { err: "vazio" };
+      } catch (e) { await sleep(1000); }
+    }
+    return { err: "rede" };
+  }
+
+  const inflight = {};
+  /* Cotações com cache por ação (10 min): só busca o que falta ou venceu */
+  function getQuotes(mkt, force) {
+    if (inflight[mkt]) return inflight[mkt];
+    const job = (async () => {
+      const key = lsGet(mkt === "b3" ? "pr-key-b3" : "pr-key-us");
+      const list = mkt === "b3" ? (key ? B3_TOP : B3_TOP.filter(([t]) => B3_FREE.has(t))) : (key ? US_TOP : []);
+      const ck = "pr-q-" + mkt;
+      let cache = {}; try { cache = JSON.parse(localStorage.getItem(ck) || "{}") || {}; } catch (e) {}
+      const now = Date.now();
+      const need = list.filter(([t]) => force || !(cache[t] && cache[t].px != null && now - cache[t].ts < CACHE_MS));
+      const errs = {};
+      if (mkt === "b3") {
+        for (const [t] of need) {
+          const q = await quoteB3(t, key);
+          if (q.px != null) cache[t] = { ...q, ts: Date.now() }; else errs[t] = q.err;
+          await sleep(250);
+        }
+      } else {
+        await Promise.all(need.map(async ([t]) => { const q = await quoteUS(t, key); if (q.px != null) cache[t] = { ...q, ts: Date.now() }; else errs[t] = q.err; }));
+      }
+      try { localStorage.setItem(ck, JSON.stringify(cache)); } catch (e) {}
+      const rows = list.map(([t, nm]) => cache[t] && cache[t].px != null ? { t, nm, ...cache[t] } : { t, nm, err: errs[t] || "rede" });
+      const tss = rows.filter(r => r.ts).map(r => r.ts);
+      return { rows, key, ts: tss.length ? Math.min(...tss) : Date.now() };
+    })();
+    inflight[mkt] = job;
+    job.finally(() => { if (inflight[mkt] === job) delete inflight[mkt]; });
+    return job;
   }
 
   async function loadStocks(force) {
@@ -1008,18 +1063,10 @@ select#simRef{background:var(--bg)}
       body.innerHTML = `<div class="st-empty">Para ver as 10 maiores da Nasdaq, cole uma chave grátis da Finnhub.<button class="btn" type="button" data-open-keys>Colocar chave</button></div>`;
       note.textContent = ""; return;
     }
-    const ck = "pr-st-" + mkt + (key ? "-k" : "");
-    let cached = null; try { cached = JSON.parse(localStorage.getItem(ck) || "null"); } catch (e) {}
-    let rows;
-    if (!force && cached && Date.now() - cached.ts < CACHE_MS) rows = cached.rows;
-    else {
-      body.innerHTML = `<div class="st-list">${"<div class='skel' style='height:52px'></div>".repeat(6)}</div>`;
-      rows = mkt === "b3" ? await fetchB3(key) : await fetchUS(key);
-      if (stState.mkt !== mkt) return;
-      if (rows.some(r => r.px != null)) try { localStorage.setItem(ck, JSON.stringify({ ts: Date.now(), rows })); } catch (e) {}
-      cached = { ts: Date.now() };
-    }
-    renderStocks(rows, mkt, key, cached.ts);
+    if (!body.querySelector(".st-row")) body.innerHTML = `<div class="st-list">${"<div class='skel' style='height:46px'></div>".repeat(6)}</div>`;
+    const res = await getQuotes(mkt, force);
+    if (stState.mkt !== mkt) return;
+    renderStocks(res.rows, mkt, res.key, res.ts);
   }
 
   function renderStocks(rows, mkt, key, ts) {
@@ -1054,8 +1101,9 @@ select#simRef{background:var(--bg)}
   $("#stBody").addEventListener("click", e => { if (e.target.closest("[data-open-keys]")) { toggleKeys(true); $("#stKeys").scrollIntoView({ behavior: "smooth", block: "nearest" }); } });
   $("#kSave").addEventListener("click", () => {
     lsSet("pr-key-b3", $("#kB3").value.trim()); lsSet("pr-key-us", $("#kUS").value.trim());
+    lsSet("pr-q-b3", ""); lsSet("pr-q-us", "");
     $("#kMsg").textContent = "Salvo neste aparelho."; setTimeout(() => toggleKeys(false), 900);
-    loadStocks(true);
+    loadStocks(true); loadTape();
   });
   $("#stSeg").addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
@@ -1064,6 +1112,53 @@ select#simRef{background:var(--bg)}
     loadStocks(false);
   });
   loadStocks(false);
+
+  /* ---------- Faixa de cotações (cripto, B3, Nasdaq) ---------- */
+  const CRYPTO = [["bitcoin", "BTC"], ["ethereum", "ETH"], ["ripple", "XRP"], ["binancecoin", "BNB"], ["solana", "SOL"],
+    ["dogecoin", "DOGE"], ["tron", "TRX"], ["cardano", "ADA"], ["hyperliquid", "HYPE"], ["chainlink", "LINK"],
+    ["stellar", "XLM"], ["sui", "SUI"], ["bitcoin-cash", "BCH"], ["avalanche-2", "AVAX"], ["litecoin", "LTC"],
+    ["hedera-hashgraph", "HBAR"], ["the-open-network", "TON"], ["shiba-inu", "SHIB"], ["polkadot", "DOT"], ["uniswap", "UNI"]];
+  const tapePx = (v, cur) => {
+    const sym = cur === "BRL" ? "R$ " : "$";
+    const d = v >= 1000 ? 0 : v >= 1 ? 2 : v >= 0.01 ? 4 : 8;
+    return sym + v.toLocaleString("pt-BR", { minimumFractionDigits: Math.min(d, 2), maximumFractionDigits: d });
+  };
+  const tapeChg = v => v == null || !isFinite(v) ? `<span class="fl">—</span>`
+    : `<span class="${v > 0.005 ? "up" : v < -0.005 ? "dn" : "fl"}">${v > 0 ? "▲" : v < -0.005 ? "▼" : ""} ${Math.abs(v).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>`;
+  function fillTape(id, items, emptyMsg) {
+    const tr = $(id);
+    if (!items.length) { tr.innerHTML = `<span class="tape-msg">${emptyMsg}</span>`; tr.style.animation = "none"; return; }
+    const html = items.map(i => `<span class="tape-it"><b>${esc(i.t)}</b><span class="p">${tapePx(i.px, i.cur)}</span>${tapeChg(i.chg)}</span>`).join("");
+    tr.style.animation = ""; tr.style.setProperty("--dur", Math.max(25, items.length * 4.5) + "s");
+    tr.innerHTML = html + html; /* duas cópias para o loop não ter emenda */
+  }
+
+  async function loadCryptoTape() {
+    try {
+      const ids = CRYPTO.map(([id]) => "coingecko:" + id).join(",");
+      const [pr, pc] = await Promise.all([
+        fetch(`https://coins.llama.fi/prices/current/${ids}`).then(r => r.json()),
+        fetch(`https://coins.llama.fi/percentage/${ids}?period=24h`).then(r => r.json())
+      ]);
+      const items = CRYPTO.map(([id, sym]) => {
+        const k = "coingecko:" + id, p = pr?.coins?.[k];
+        return p?.price ? { t: sym, px: p.price, cur: "USD", chg: pc?.coins?.[k] } : null;
+      }).filter(Boolean);
+      fillTape("#tapeCrypto", items, "Cotações cripto indisponíveis agora");
+    } catch (e) { fillTape("#tapeCrypto", [], "Cotações cripto indisponíveis agora"); }
+  }
+  async function loadStockTape(mkt) {
+    const id = mkt === "b3" ? "#tapeB3" : "#tapeUS";
+    if (mkt === "us" && !lsGet("pr-key-us")) { fillTape(id, [], "Coloque a chave da Finnhub em “Chaves das cotações”"); return; }
+    const res = await getQuotes(mkt, false);
+    const items = res.rows.filter(r => r.px != null).sort((a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9));
+    fillTape(id, items, "Carregando…");
+  }
+  function loadTape() { loadCryptoTape(); loadStockTape("b3"); loadStockTape("us"); }
+  ["#tapeCrypto", "#tapeB3", "#tapeUS"].forEach(id => $(id).innerHTML = `<span class="tape-msg">Carregando…</span>`);
+  loadTape();
+  setInterval(loadCryptoTape, 60 * 1000);
+  setInterval(() => { loadStockTape("b3"); loadStockTape("us"); if (document.visibilityState === "visible") loadStocks(false); }, CACHE_MS + 5000);
 
   /* App instalável: botão "Instalar app" quando o navegador permite */
   let installEvt = null;
