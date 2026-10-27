@@ -302,7 +302,7 @@ select#simRef{background:var(--bg)}
 <section class="top5 wrap" aria-labelledby="t5h">
   <div class="t5-head">
     <h2 id="t5h">Top 5 · últimos 30 dias</h2>
-    <span class="t5-crit">Uniswap, Raydium e Orca · maior APY médio em 30 dias · TVL acima de US$ 100 mil</span>
+    <span class="t5-crit">Uniswap, Raydium e Orca · maior APY de taxas em 30 dias · gerando taxas quase todo dia · TVL acima de US$ 100 mil</span>
   </div>
   <div class="t5-list" id="top5">
     <div class="skel t5-skel"></div><div class="skel t5-skel"></div><div class="skel t5-skel"></div>
@@ -578,18 +578,53 @@ select#simRef{background:var(--bg)}
 
   /* Top 5 só considera estas DEXes (todas as versões: Uniswap V2/V3/V4, Raydium AMM/CLMM/CPMM, Orca) */
   const TOP5_DEX_RE = /^(uniswap|raydium|orca)/i;
-  function renderTop5() {
-    const top = state.all
-      .filter(p => TOP5_DEX_RE.test(p.project) && p.tvlUsd >= 1e5 && !p.outlier && (p.count == null || p.count >= 30) && p.apyMean30d != null && isFinite(p.apyMean30d))
-      .sort((a, b) => b.apyMean30d - a.apyMean30d)
-      .slice(0, 5);
+  /* Histórico diário de um pool (o mesmo que o painel usa, então abrir o card depois é instantâneo) */
+  async function poolHistory(id) {
+    if (charts.has(id)) return charts.get(id);
+    const r = await fetch(API + "/chart/" + encodeURIComponent(id));
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const j = await r.json();
+    const data = (j.data || []).map(d => ({ t: new Date(d.timestamp), apy: d.apy, apyBase: d.apyBase, tvlUsd: d.tvlUsd }));
+    charts.set(id, data);
+    return data;
+  }
+
+  let top5Token = 0;
+  async function renderTop5() {
+    const my = ++top5Token;
     const box = $("#top5");
+    /* 1) candidatos: DEX certa, TVL ≥ 100 mil, histórico ≥ 30 dias e gerando taxas agora */
+    const cands = state.all
+      .filter(p => TOP5_DEX_RE.test(p.project) && p.tvlUsd >= 1e5 && !p.outlier && (p.count == null || p.count >= 30)
+        && p.apyBase > 0 && (p.volumeUsd1d == null || p.volumeUsd1d > 0))
+      .sort((a, b) => Math.max(b.apyBase7d || 0, b.apyBase || 0, b.apyMean30d || 0) - Math.max(a.apyBase7d || 0, a.apyBase || 0, a.apyMean30d || 0))
+      .slice(0, 30);
+    /* 2) taxas reais dia a dia nos últimos 30 dias */
+    const scored = [];
+    for (let i = 0; i < cands.length; i += 6) {
+      const batch = await Promise.all(cands.slice(i, i + 6).map(async p => {
+        try {
+          const cut = Date.now() - 30 * 864e5;
+          const days = (await poolHistory(p.pool)).filter(d => d.t.getTime() >= cut);
+          const fees = days.map(d => (d.apyBase != null && isFinite(d.apyBase)) ? d.apyBase : 0);
+          if (fees.length < 24) return null;
+          const withFees = fees.filter(v => v > 0).length;
+          const mean = fees.reduce((x, y) => x + y, 0) / fees.length, med = median(fees);
+          /* precisa render quase todo dia e não depender de um pico isolado */
+          if (withFees < 24 || med <= 0 || med < mean * 0.3) return null;
+          return { p, mean, withFees, n: fees.length };
+        } catch (e) { return null; }
+      }));
+      if (my !== top5Token) return;
+      scored.push(...batch.filter(Boolean));
+    }
+    const top = scored.sort((a, b) => b.mean - a.mean).slice(0, 5);
     if (!top.length) { box.innerHTML = `<p class="note">Nenhum pool atende aos critérios agora.</p>`; return; }
-    box.innerHTML = top.map((p, i) => `<button class="t5" type="button" data-id="${esc(p.pool)}">
+    box.innerHTML = top.map(({ p, mean, withFees, n }, i) => `<button class="t5" type="button" data-id="${esc(p.pool)}">
         <span class="t5-top"><span class="rk"><b>#${i + 1}</b> · <span class="chainline">${chainIcon(p.chain)}${esc(p.chain)}</span></span>${pairIcon(p.symbol, "sm")}</span>
         <span style="min-width:0"><span class="sym" style="display:block">${esc(p.symbol)}</span><span class="sub" style="display:block">${esc(pretty(p.project))}${p.poolMeta ? " · " + esc(p.poolMeta) : ""}</span></span>
-        <span class="big">${pct(p.apyMean30d)}<small>APY médio 30D</small></span>
-        <span class="mini"><span>Hoje ${pct(p.apy)}</span><span>TVL ${usd(p.tvlUsd)}</span></span>
+        <span class="big">${pct(mean)}<small>APY de taxas · média 30D</small></span>
+        <span class="mini"><span title="Dias com taxas nos últimos 30">${withFees}/${n} dias</span><span>TVL ${usd(p.tvlUsd)}</span></span>
       </button>`).join("");
   }
   $("#top5").addEventListener("click", e => { const b = e.target.closest(".t5"); if (b) openPool(b.dataset.id); });
