@@ -148,6 +148,13 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
 .tape-it .p{color:var(--muted)}
 .tape-it .up{color:var(--good)} .tape-it .dn{color:var(--bad)} .tape-it .fl{color:var(--muted)}
 .tape-msg{padding:8px 14px;color:var(--muted);font-family:var(--f-body);white-space:nowrap}
+.fx{flex:1;min-width:0;display:flex;align-items:center;overflow-x:auto;scrollbar-width:none}
+.fx::-webkit-scrollbar{display:none}
+.fx .tape-it:last-child{border-right:0}
+.cur-ic{--sz:18px;flex:none;width:var(--sz);height:var(--sz);border-radius:50%;display:inline-grid;place-items:center;font:700 10.5px/1 var(--f-body);color:#fff}
+.cur-ic.usd{background:#2f6b4f} .cur-ic.eur{background:#2b4c9a}
+.fx-time{margin-left:auto;padding:8px 14px;color:var(--muted);font:400 11px var(--f-body);white-space:nowrap}
+@media (max-width:520px){.fx-nm,.fx-time{display:none}.fx .tape-it{padding:8px 10px;gap:6px}}
 @keyframes tape{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 @media (prefers-reduced-motion:reduce){.tape-track{animation:none}.tape-vp{overflow-x:auto}}
 .ic{--sz:22px;position:relative;flex:none;width:var(--sz);height:var(--sz);border-radius:50%;display:inline-grid;place-items:center;overflow:hidden;
@@ -278,6 +285,7 @@ select#simRef{background:var(--bg)}
   <div class="tape-row"><span class="tape-lbl">Cripto</span><div class="tape-vp"><div class="tape-track" id="tapeCrypto" style="--dur:70s"></div></div></div>
   <div class="tape-row"><span class="tape-lbl">B3</span><div class="tape-vp"><div class="tape-track" id="tapeB3" style="--dur:55s"></div></div></div>
   <div class="tape-row"><span class="tape-lbl">Nasdaq</span><div class="tape-vp"><div class="tape-track" id="tapeUS" style="--dur:60s"></div></div></div>
+  <div class="tape-row fx-row"><span class="tape-lbl">Câmbio</span><div class="fx" id="fx"><span class="tape-msg">Carregando…</span></div></div>
 </div>
 
 <header class="top wrap">
@@ -1212,10 +1220,31 @@ select#simRef{background:var(--bg)}
     const items = res.rows.filter(r => r.px != null).sort((a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9)).map(r => ({ ...r, mkt }));
     fillTape(id, items, "Carregando…");
   }
-  function loadTape() { loadCryptoTape(); loadStockTape("b3"); loadStockTape("us"); }
+  /* Câmbio: dólar e euro em reais (AwesomeAPI, sem chave; brapi como reserva se houver token) */
+  async function loadFX() {
+    const box = $("#fx");
+    let data = null;
+    try {
+      const r = await fetch("https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL");
+      if (r.ok) { const j = await r.json(); if (j.USDBRL && j.EURBRL) data = [["USD", "Dólar", +j.USDBRL.bid, +j.USDBRL.pctChange], ["EUR", "Euro", +j.EURBRL.bid, +j.EURBRL.pctChange]]; }
+    } catch (e) {}
+    if (!data && lsGet("pr-key-b3")) {
+      try {
+        const r = await fetch(`https://brapi.dev/api/v2/currency?currency=USD-BRL,EUR-BRL&token=${encodeURIComponent(lsGet("pr-key-b3"))}`);
+        const c = (await r.json()).currency || [];
+        const f = code => c.find(x => (x.fromCurrency || "").toUpperCase() === code);
+        if (f("USD") && f("EUR")) data = [["USD", "Dólar", +f("USD").bidPrice, +f("USD").percentageChange], ["EUR", "Euro", +f("EUR").bidPrice, +f("EUR").percentageChange]];
+      } catch (e) {}
+    }
+    if (!data) { box.innerHTML = `<span class="tape-msg">Câmbio indisponível agora</span>`; return; }
+    box.innerHTML = data.map(([code, nm, v, chg]) => `<span class="tape-it"><span class="cur-ic ${code.toLowerCase()}">${code === "USD" ? "$" : "€"}</span><b class="fx-nm">${nm}</b><span class="p">R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}</span>${tapeChg(chg)}</span>`).join("") +
+      `<span class="fx-time">${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>`;
+  }
+
+  function loadTape() { loadCryptoTape(); loadStockTape("b3"); loadStockTape("us"); loadFX(); }
   ["#tapeCrypto", "#tapeB3", "#tapeUS"].forEach(id => $(id).innerHTML = `<span class="tape-msg">Carregando…</span>`);
   loadTape();
-  setInterval(loadCryptoTape, 60 * 1000);
+  setInterval(() => { loadCryptoTape(); loadFX(); }, 60 * 1000);
   setInterval(() => { loadStockTape("b3"); loadStockTape("us"); if (document.visibilityState === "visible") loadStocks(false); }, CACHE_MS + 5000);
 
   /* App instalável: botão "Instalar app" quando o navegador permite */
