@@ -431,7 +431,10 @@ select#simRef{background:var(--bg)}
   <div class="sheet-b">
     <div class="s-quote" id="sQuote"></div>
     <div class="seg tabs" id="sRange">
-      <button type="button" data-r="1y" aria-pressed="true">1 ano</button>
+      <button type="button" data-r="7d" aria-pressed="false">7D</button>
+      <button type="button" data-r="14d" aria-pressed="false">14D</button>
+      <button type="button" data-r="30d" aria-pressed="true">30D</button>
+      <button type="button" data-r="1y" aria-pressed="false">1 ano</button>
       <button type="button" data-r="max" aria-pressed="false">Tudo</button>
     </div>
     <div class="stats" id="sStats"></div>
@@ -1547,7 +1550,59 @@ select#simRef{background:var(--bg)}
 
   /* ---------- Gráfico de ação (1 ano e completo) ---------- */
   const H_CACHE_MS = 12 * 60 * 60 * 1000;
-  const stk = { t: null, mkt: null, range: "1y", pts: null, src: "", partial: false };
+  const stk = { t: null, mkt: null, range: "30d", long: null, daily: null, px: null };
+  const SHORT = { "7d": 7, "14d": 14, "30d": 30 };
+  /* Histórico diário recente (para 7, 14 e 30 dias) */
+  async function getDaily(t, mkt) {
+    const ck = `pr-d-${mkt}-${t}`;
+    try { const c = JSON.parse(localStorage.getItem(ck) || "null"); if (c && Date.now() - c.ts < (mkt === "b3" ? 36e5 : 6 * 36e5)) return c; } catch (e) {}
+    let res = null, err = "vazio";
+    if (mkt === "b3") {
+      const key = lsGet("pr-key-b3");
+      for (let i = 0; i < 3 && !res; i++) {
+        try {
+          const r = await fetch(`https://brapi.dev/api/quote/${t}?range=3mo&interval=1d` + (key && !B3_FREE.has(t) ? `&token=${encodeURIComponent(key)}` : ""));
+          if (r.status === 429 || r.status >= 500) { await sleep(1200 * (i + 1)); continue; }
+          if (!r.ok) break;
+          const h = (await r.json()).results?.[0]?.historicalDataPrice || [];
+          const pts = h.map(d => [d.date * 1000, +d.close]).filter(q => isFinite(q[1]) && q[1] > 0).sort((a, b) => a[0] - b[0]);
+          if (pts.length >= 2) res = { pts, src: "brapi (diário)" };
+          break;
+        } catch (e) { err = "rede"; await sleep(1200 * (i + 1)); }
+      }
+    } else {
+      const key = lsGet("pr-key-av");
+      if (!key) return { err: "semchave" };
+      try {
+        const j = await (await fetch(`https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&outputsize=compact&symbol=${encodeURIComponent(t)}&apikey=${encodeURIComponent(key)}`)).json();
+        const ser = j["Time Series (Daily)"];
+        if (ser) res = { pts: Object.entries(ser).map(([d, v]) => [Date.parse(d + "T00:00:00Z"), +v["4. close"]]).filter(q => isFinite(q[1]) && q[1] > 0).sort((a, b) => a[0] - b[0]), src: "Alpha Vantage (diário)" };
+        else err = (j.Note || j.Information) ? "limite" : "vazio";
+      } catch (e) { err = "rede"; }
+    }
+    if (!res) return { err };
+    res.ts = Date.now();
+    try { localStorage.setItem(ck, JSON.stringify(res)); } catch (e) {}
+    return res;
+  }
+  async function showStockRange() {
+    const t = stk.t, short = !!SHORT[stk.range];
+    if (short ? stk.daily : stk.long) { drawStock(); return; }
+    $("#sStats").innerHTML = ""; $("#sNote").textContent = "";
+    $("#sChart").innerHTML = `<div class="skel" style="height:220px"></div>`;
+    const res = short ? await getDaily(t, stk.mkt) : await getHistory(t, stk.mkt);
+    if (stk.t !== t) return;
+    if (res.err) {
+      const msg = res.err === "semchave"
+        ? `Para ver o gráfico ${stk.mkt === "us" ? "das ações da Nasdaq" : "de 1 ano e completo desta ação"}, coloque uma chave grátis da Alpha Vantage em “Chaves das cotações”.`
+        : res.err === "limite" ? "A Alpha Vantage atingiu o limite grátis (25 consultas por dia ou 5 por minuto). Tente de novo mais tarde."
+        : "Não encontrei o histórico desta ação agora.";
+      if (!!SHORT[stk.range] === short) $("#sChart").innerHTML = `<div class="st-empty">${msg}${res.err === "semchave" ? `<button class="btn" type="button" id="sKeys">Colocar chave</button>` : ""}</div>`;
+      return;
+    }
+    if (short) stk.daily = res; else stk.long = res;
+    if (!!SHORT[stk.range] === short) drawStock();
+  }
   async function histAV(t, mkt, key) {
     const sym = mkt === "b3" ? t + ".SAO" : t;
     const r = await fetch(`https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol=${encodeURIComponent(sym)}&apikey=${encodeURIComponent(key)}`);
@@ -1583,45 +1638,44 @@ select#simRef{background:var(--bg)}
 
   function openStock(t, mkt) {
     const name = (mkt === "b3" ? B3_TOP : US_TOP).find(x => x[0] === t)?.[1] || t;
-    Object.assign(stk, { t, mkt, pts: null });
+    Object.assign(stk, { t, mkt, long: null, daily: null, px: null });
     $("#sIcon").innerHTML = stockIcon(t, mkt);
     $("#sTitle").textContent = t;
     $("#sSub").textContent = name + " · " + (mkt === "b3" ? "B3" : "Nasdaq");
     let q = null; try { q = JSON.parse(localStorage.getItem("pr-q-" + mkt) || "{}")[t]; } catch (e) {}
+    stk.px = q && q.px != null ? q.px : null;
     const cur = mkt === "b3" ? "BRL" : "USD";
     const money = v => v.toLocaleString("pt-BR", { style: "currency", currency: cur, minimumFractionDigits: 2, maximumFractionDigits: 2 });
     $("#sQuote").innerHTML = q && q.px != null ? `<span class="big">${money(q.px)}</span><span class="chg ${q.chg > 0.005 ? "up" : q.chg < -0.005 ? "dn" : "fl"}">${q.chg > 0 ? "+" : ""}${(q.chg ?? 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}% hoje</span>` : "";
     $("#sStats").innerHTML = ""; $("#sNote").textContent = "";
     $("#sChart").innerHTML = `<div class="skel" style="height:220px"></div>`;
     $("#stScrim").hidden = false; $("#stSheet").hidden = false; document.body.style.overflow = "hidden"; $("#sClose").focus();
-    getHistory(t, mkt).then(res => {
-      if (stk.t !== t) return;
-      if (res.err) {
-        const msg = res.err === "semchave"
-          ? `Para ver o gráfico ${mkt === "us" ? "das ações da Nasdaq" : "desta ação"} de 1 ano e completo, coloque uma chave grátis da Alpha Vantage em “Chaves das cotações”.`
-          : res.err === "limite" ? "A Alpha Vantage atingiu o limite grátis (25 consultas por dia ou 5 por minuto). Tente de novo mais tarde."
-          : "Não encontrei o histórico desta ação agora.";
-        $("#sChart").innerHTML = `<div class="st-empty">${msg}${res.err === "semchave" ? `<button class="btn" type="button" id="sKeys">Colocar chave</button>` : ""}</div>`;
-        return;
-      }
-      Object.assign(stk, { pts: res.pts, src: res.src, partial: res.partial });
-      drawStock();
-    });
+    $("#sRange").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x.dataset.r === stk.range)));
+    showStockRange();
   }
   function closeStock() { $("#stScrim").hidden = true; $("#stSheet").hidden = true; document.body.style.overflow = ""; stk.t = null; }
 
   function drawStock() {
-    if (!stk.pts) return;
+    const days = SHORT[stk.range], data = days ? stk.daily : stk.long;
+    if (!data) return;
     const cur = stk.mkt === "b3" ? "BRL" : "USD";
     const money = v => v.toLocaleString("pt-BR", { style: "currency", currency: cur, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    let pts = stk.pts;
-    if (stk.range === "1y") { const cut = Date.now() - 365 * 864e5; const f = pts.filter(p => p[0] >= cut); if (f.length >= 2) pts = f; }
+    let pts = data.pts.slice();
+    /* termina no preço de agora, se o último fechamento for de outro dia */
+    if (stk.px != null && pts.length && Date.now() - pts[pts.length - 1][0] > 20 * 36e5) pts.push([Date.now(), stk.px]);
+    const span = days || (stk.range === "1y" ? 365 : 0);
+    if (span) {
+      const cut = Date.now() - span * 864e5;
+      let i0 = -1; pts.forEach((p, i) => { if (p[0] <= cut) i0 = i; });
+      const f = pts.slice(Math.max(0, i0));
+      if (f.length >= 2) pts = f;
+    }
     if (pts.length < 2) { $("#sChart").innerHTML = `<div class="empty">Poucos dados para esse período.</div>`; return; }
     const first = pts[0][1], last = pts[pts.length - 1][1], chg = (last / first - 1) * 100;
     const hi = Math.max(...pts.map(p => p[1])), lo = Math.min(...pts.map(p => p[1]));
     const years = (pts[pts.length - 1][0] - pts[0][0]) / (365.25 * 864e5);
     $("#sStats").innerHTML = [
-      [stk.range === "1y" ? "Variação 1 ano" : `Variação ${years >= 1 ? Math.round(years) + " anos" : "no período"}`, `<span class="${chg >= 0 ? "pos" : "neg"}">${chg > 0 ? "+" : ""}${chg.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span>`],
+      [days ? `Variação ${days} dias` : stk.range === "1y" ? "Variação 1 ano" : `Variação ${years >= 1 ? Math.round(years) + " anos" : "no período"}`, `<span class="${chg >= 0 ? "pos" : "neg"}">${chg > 0 ? "+" : ""}${chg.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%</span>`],
       ["Máxima", money(hi)], ["Mínima", money(lo)]
     ].map(([k, v]) => `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
     const box = $("#sChart");
@@ -1635,7 +1689,7 @@ select#simRef{background:var(--bg)}
     const area = line + `L${xy[xy.length - 1][0].toFixed(1)} ${H - B}L${xy[0][0].toFixed(1)} ${H - B}Z`;
     const col = chg >= 0 ? "var(--good)" : "var(--bad)";
     const ticks = [0, 1, 2, 3].map(i => yl + (yh - yl) * i / 3);
-    const dfmt = ms => new Date(ms).toLocaleDateString("pt-BR", stk.range === "1y" ? { month: "short", year: "2-digit" } : { year: "numeric" });
+    const dfmt = ms => new Date(ms).toLocaleDateString("pt-BR", days ? { day: "2-digit", month: "short" } : stk.range === "1y" ? { month: "short", year: "2-digit" } : { year: "numeric" });
     const tfmt = ms => new Date(ms).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
     box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Gráfico de preço de ${esc(stk.t)}">
       ${ticks.map(v => `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="axis" x="${L - 6}" y="${y(v) + 3.5}" text-anchor="end">${v.toLocaleString("pt-BR", { maximumSignificantDigits: 4 })}</text>`).join("")}
@@ -1660,7 +1714,7 @@ select#simRef{background:var(--bg)}
     };
     svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move);
     svg.addEventListener("pointerleave", () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); });
-    $("#sNote").textContent = `Fonte: ${stk.src}. ` + (stk.partial ? "Sem a chave da Alpha Vantage, o plano grátis da brapi só libera os últimos 3 meses desta ação, então “1 ano” e “Tudo” mostram esse período." : "Preço de fechamento, sem ajuste por dividendos.");
+    $("#sNote").textContent = `Fonte: ${data.src}. ` + (!days && data.partial ? "Sem a chave da Alpha Vantage, o plano grátis da brapi só libera os últimos 3 meses desta ação, então “1 ano” e “Tudo” mostram esse período." : "Preço de fechamento, sem ajuste por dividendos.");
   }
 
   $("#stBody").addEventListener("click", e => { const r = e.target.closest(".st-row"); if (r) openStock(r.dataset.t, r.dataset.mkt); });
@@ -1672,9 +1726,9 @@ select#simRef{background:var(--bg)}
   $("#sChart").addEventListener("click", e => { if (e.target.closest("#sKeys")) { closeStock(); toggleKeys(true); $("#stKeys").scrollIntoView({ behavior: "smooth", block: "center" }); } });
   $("#sRange").addEventListener("click", e => {
     const b = e.target.closest("button"); if (!b) return;
-    stk.range = b.dataset.r; $("#sRange").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawStock();
+    stk.range = b.dataset.r; $("#sRange").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); showStockRange();
   });
-  window.addEventListener("resize", () => { if (stk.t) drawStock(); });
+  window.addEventListener("resize", () => { if (stk.t && (SHORT[stk.range] ? stk.daily : stk.long)) drawStock(); });
 
   /* App instalável: botão "Instalar app" quando o navegador permite */
   let installEvt = null;
