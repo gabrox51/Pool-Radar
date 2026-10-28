@@ -183,6 +183,14 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
 .s-quote .big{font:600 28px/1 var(--f-mono);font-variant-numeric:tabular-nums}
 .s-quote .chg{font-size:14px}
 #sStats{grid-template-columns:repeat(3,minmax(0,1fr))}
+.poolcard{margin-top:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--accent);background:var(--accent-soft);border-radius:12px}
+.poolcard .pc-txt{flex:1 1 180px;min-width:0;font-size:13.5px}
+.poolcard .pc-txt b{display:block;font-size:14.5px;color:var(--fg)}
+.poolcard .pc-txt span{color:var(--muted)}
+.pc-go{display:inline-flex;align-items:center;gap:6px;background:var(--accent);color:var(--bg);font-weight:700;font-size:14px;text-decoration:none;padding:10px 14px;border-radius:10px;white-space:nowrap}
+.pc-go:hover{filter:brightness(1.08)}
+.pc-sub{flex-basis:100%;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
+.pc-sub a{color:var(--accent);font-weight:600;text-decoration:none}
 footer{color:var(--muted);font-size:12.5px;padding-block:10px 40px;border-top:1px solid var(--line)}
 footer a{color:var(--muted)}
 
@@ -456,6 +464,7 @@ select#simRef{background:var(--bg)}
       <div>
         <div class="sec">Projeção se o preço ficar dentro do range</div>
         <div class="stats two" id="simProj"></div>
+        <div class="poolcard" id="poolCard"></div>
       </div>
       <div id="btWrap">
         <div class="ctrls"><div class="sec">Se investir hoje, simulando os próximos</div>
@@ -508,7 +517,7 @@ select#simRef{background:var(--bg)}
   const PAGE = 50;
   const CL_RE = /(v3|v4|clmm|dlmm|slipstream|whirlpool|orca|concentrated|algebra|elastic|maverick|liquidity-book|joe-v2|-cl\b|ramses|pharaoh|thena-fusion|quickswap-dex|project-x|prjx|hyperswap|kittenswap|byreal|bluefin|cetus|turbos|momentum|ekubo|metropolis|hybra)/i;
   /* Pool com faixa de taxa (0.05%, 0.3%, 1%…), "CL" ou "bin" no nome quase sempre é de liquidez concentrada */
-  const META_CL_RE = /^\s*\d+(\.\d+)?\s*%\s*$|\bcl\b|\bbin|tick|dynamic fee/i;
+  const META_CL_RE = /^\s*\d+(\.\d+)?\s*%\s*$|\bcl\b|\bbin|tick|dynamic fee|concentrated|clmm/i;
   const clOverride = new Set();
   const isCLPool = p => CL_RE.test(p.project) || META_CL_RE.test(p.poolMeta || "") || clOverride.has(p.pool);
 
@@ -706,7 +715,8 @@ select#simRef{background:var(--bg)}
   function openPool(id) {
     const p = state.all.find(x => x.pool === id); if (!p) return;
     state.pool = p;
-    $("#dTitle").textContent = p.symbol + (p.poolMeta ? " · " + p.poolMeta : "");
+    const meta = (p.poolMeta || "").replace(/^\s*concentrated\s*-\s*/i, "");
+    $("#dTitle").textContent = p.symbol + (meta ? " · " + meta : "");
     $("#dIcons").innerHTML = pairIcon(p.symbol, "lg");
     $("#dSub").textContent = pretty(p.project) + " · " + p.chain;
     $("#dStats").innerHTML = [
@@ -820,6 +830,43 @@ select#simRef{background:var(--bg)}
     svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", leave);
   }
 
+  /* ---------- Link para a página do pool na DEX ---------- */
+  const EVM_SLUG = { ethereum: "ethereum", arbitrum: "arbitrum", optimism: "optimism", "op mainnet": "optimism", polygon: "polygon", base: "base",
+    bsc: "bnb", binance: "bnb", avalanche: "avalanche", celo: "celo", blast: "blast", zora: "zora", unichain: "unichain", "world chain": "worldchain" };
+  const DS_SLUG = { ethereum: "ethereum", arbitrum: "arbitrum", optimism: "optimism", "op mainnet": "optimism", polygon: "polygon", base: "base",
+    bsc: "bsc", binance: "bsc", avalanche: "avalanche", solana: "solana", sui: "sui", "hyperliquid l1": "hyperevm", hyperliquid: "hyperevm",
+    sonic: "sonic", linea: "linea", scroll: "scroll", blast: "blast", mantle: "mantle", celo: "celo", unichain: "unichain", berachain: "berachain" };
+  const DEX_HOME = { uniswap: "https://app.uniswap.org/explore/pools", raydium: "https://raydium.io/liquidity-pools/", orca: "https://www.orca.so/pools",
+    meteora: "https://app.meteora.ag/", aerodrome: "https://aerodrome.finance/liquidity", velodrome: "https://velodrome.finance/liquidity",
+    pancakeswap: "https://pancakeswap.finance/liquidity/pools", sushiswap: "https://www.sushi.com/pool", "project-x": "https://www.prjx.com/",
+    hyperswap: "https://hyperswap.exchange/", kittenswap: "https://kittenswap.finance/", cetus: "https://app.cetus.zone/liquidity",
+    bluefin: "https://trade.bluefin.io/liquidity-pools", curve: "https://www.curve.finance/dex/", balancer: "https://balancer.fi/pools" };
+  function poolLinks(p, isCL) {
+    const raw = String(p.pool || "");
+    const evm = (raw.match(/0x[0-9a-fA-F]{64}|0x[0-9a-fA-F]{40}/) || [])[0];
+    const sol = !evm && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(raw.split("-")[0]) ? raw.split("-")[0] : null;
+    const addr = evm || sol;
+    const chain = String(p.chain || "").toLowerCase(), proj = String(p.project || "").toLowerCase();
+    let dex = null;
+    if (addr) {
+      if (proj.startsWith("uniswap") && evm && EVM_SLUG[chain]) dex = `https://app.uniswap.org/explore/pools/${EVM_SLUG[chain]}/${evm}`;
+      else if (proj.startsWith("raydium") && sol) dex = isCL ? `https://raydium.io/clmm/create-position/?pool_id=${sol}` : `https://raydium.io/liquidity/increase/?mode=add&pool_id=${sol}`;
+      else if (proj.startsWith("orca") && sol) dex = `https://www.orca.so/pools/${sol}`;
+      else if (proj.startsWith("meteora") && sol) dex = proj.includes("dlmm") ? `https://app.meteora.ag/dlmm/${sol}` : `https://app.meteora.ag/pools/${sol}`;
+    }
+    const homeKey = Object.keys(DEX_HOME).find(k => proj.startsWith(k));
+    const chart = addr && DS_SLUG[chain] ? `https://dexscreener.com/${DS_SLUG[chain]}/${addr}` : null;
+    return { dex, home: homeKey ? DEX_HOME[homeKey] : null, chart, llama: `https://defillama.com/yields/pool/${encodeURIComponent(raw)}` };
+  }
+  function renderPoolCard(p, isCL) {
+    const L = poolLinks(p, isCL), name = pretty(String(p.project || "").split("-")[0]);
+    const main = L.dex || L.home || L.llama;
+    const what = L.dex ? `Abre este pool na ${esc(name)} para adicionar liquidez.` : L.home ? `Abre a página de pools da ${esc(name)}. Procure por ${esc(p.symbol)}.` : "Abre a página do pool na DefiLlama, com o link para a DEX.";
+    $("#poolCard").innerHTML = `<div class="pc-txt"><b>Gostou da simulação?</b><span>${what}</span></div>
+      <a class="pc-go" href="${esc(main)}" target="_blank" rel="noopener">${L.dex ? "Abrir pool" : "Abrir"} na ${L.dex || L.home ? esc(name) : "DefiLlama"} ↗</a>
+      <div class="pc-sub">${L.chart ? `<a href="${esc(L.chart)}" target="_blank" rel="noopener">Gráfico do par no DexScreener ↗</a>` : ""}${main !== L.llama ? `<a href="${esc(L.llama)}" target="_blank" rel="noopener">Ver na DefiLlama ↗</a>` : ""}</div>`;
+  }
+
   /* ---------- Simulador de taxas ---------- */
   const sim = { cap: 1000, down: 10, up: 10, days: 30, ref: "0.5" };
   try { Object.assign(sim, JSON.parse(localStorage.getItem("pr-sim") || "{}")); } catch (e) {}
@@ -909,6 +956,7 @@ select#simRef{background:var(--bg)}
       ["APY estimado", pct(estApr), "acc"],
       [isCL ? "Concentração vs. LP médio" : "Base usada", isCL ? factor.toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + "×" : pct(baseApy), ""]
     ].map(([k, v, c]) => `<div class="stat"><div class="k">${k}</div><div class="v ${c}">${v}</div></div>`).join("");
+    renderPoolCard(p, isCL);
 
     const pb = $("#simPrice"), bt = $("#simBt"), sc = $("#simChart");
     if (!priceCache.has(p.pool)) { pb.innerHTML = `<span class="msg">Carregando preços dos tokens…</span>`; $("#btWrap").hidden = false; bt.innerHTML = `<div class="skel" style="height:120px"></div>`; sc.innerHTML = ""; }
