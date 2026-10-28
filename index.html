@@ -246,6 +246,12 @@ footer a{color:var(--muted)}
 .chart svg{display:block;width:100%;height:220px;overflow:visible}
 .chart .axis{fill:var(--muted);font:10.5px var(--f-mono)}
 .chart .grid{stroke:var(--line);stroke-width:1}
+.tip2{position:absolute;z-index:2;pointer-events:none;transform:translate(-50%,-100%);display:flex;flex-direction:column;align-items:center;gap:2px;
+  background:var(--fg);color:var(--bg);padding:6px 10px;border-radius:9px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.25)}
+.tip2.below{transform:translate(-50%,0)}
+.tip2 b{font:600 11.5px/1.2 var(--f-body)}
+.tip2 span{font:600 14px/1.2 var(--f-mono);font-variant-numeric:tabular-nums}
+.chart svg{-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
 .tip{position:absolute;pointer-events:none;background:var(--fg);color:var(--bg);font:12px/1.35 var(--f-mono);padding:6px 8px;border-radius:7px;white-space:nowrap;transform:translate(-50%,-110%)}
 .verdict{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:12px;background:var(--surface-2)}
 .pill{flex:none;font:600 11.5px/1 var(--f-body);padding:6px 9px;border-radius:999px;color:var(--surface)}
@@ -552,6 +558,46 @@ select#simRef{background:var(--bg)}
   const pretty = s => (s || "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+  /* ---------- Toque nos gráficos: bolinha + etiqueta com data e valor ---------- */
+  function attachScrub(box, W, H, T, B, xy, labelOf, color) {
+    const svg = box.querySelector("svg"); if (!svg || !xy.length) return;
+    svg.style.touchAction = "pan-y"; /* arrastar na horizontal mexe no gráfico; na vertical rola a página */
+    const NS = "http://www.w3.org/2000/svg", mk = (tag, attrs) => { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); return el; };
+    const g = mk("g", { visibility: "hidden", "pointer-events": "none" });
+    const vl = mk("line", { y1: T, y2: H - B, stroke: "var(--muted)", "stroke-width": 1, "stroke-dasharray": "3 3" });
+    const halo = mk("circle", { r: 11, fill: color, "fill-opacity": .22 });
+    const dot = mk("circle", { r: 5.5, fill: color, stroke: "var(--surface)", "stroke-width": 2.5 });
+    g.append(vl, halo, dot); svg.appendChild(g);
+    const tip = document.createElement("div"); tip.className = "tip2"; tip.hidden = true; box.appendChild(tip);
+    let raf = 0, lastX = 0, cur = -1;
+    const show = i => {
+      if (i === cur) return; cur = i;
+      const [cx, cy] = xy[i], r = svg.getBoundingClientRect(), sx = r.width / W, sy = r.height / H;
+      vl.setAttribute("x1", cx); vl.setAttribute("x2", cx);
+      halo.setAttribute("cx", cx); halo.setAttribute("cy", cy); dot.setAttribute("cx", cx); dot.setAttribute("cy", cy);
+      g.setAttribute("visibility", "visible");
+      const [a, b] = labelOf(i);
+      tip.innerHTML = `<b>${esc(a)}</b><span>${esc(b)}</span>`; tip.hidden = false;
+      const tw = tip.offsetWidth || 120, left = Math.min(Math.max(cx * sx, tw / 2 + 2), r.width - tw / 2 - 2);
+      const y = cy * sy, above = y - 54 > 0;
+      tip.style.left = left + "px"; tip.style.top = (above ? y - 16 : y + 16) + "px";
+      tip.classList.toggle("below", !above);
+    };
+    const at = clientX => {
+      const r = svg.getBoundingClientRect(), px = (clientX - r.left) * (W / r.width);
+      let lo = 0, hi = xy.length - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (xy[mid][0] < px) lo = mid; else hi = mid; }
+      show(Math.abs(xy[lo][0] - px) <= Math.abs(xy[hi][0] - px) ? lo : hi);
+    };
+    const queue = e => { lastX = e.clientX; if (!raf) raf = requestAnimationFrame(() => { raf = 0; at(lastX); }); };
+    svg.addEventListener("pointerdown", e => { at(e.clientX); });
+    svg.addEventListener("pointermove", queue);
+    /* no mouse some ao sair; no toque a etiqueta fica até tocar de novo */
+    svg.addEventListener("pointerleave", e => { if (e.pointerType === "mouse") { g.setAttribute("visibility", "hidden"); tip.hidden = true; cur = -1; } });
+  }
+  /* só redesenha se a largura mudou de verdade (a barra do navegador some e aparece ao rolar no celular) */
+  const widthChanged = box => box && Math.abs((box.clientWidth || 0) - (+box.dataset.w || 0)) > 2;
+
   /* ---------- Ícones: tenta cada fonte em ordem; se todas falharem, fica o círculo com a inicial ---------- */
   const CI = s => `https://cdn.jsdelivr.net/npm/cryptocurrency-icons@0.18.1/svg/color/${s}.svg`;
   const LLAMA_CHAIN = c => `https://icons.llamao.fi/icons/chains/rsz_${c}.jpg`;
@@ -827,27 +873,12 @@ select#simRef{background:var(--bg)}
       <circle cx="${last[0]}" cy="${last[1]}" r="4" fill="var(--chart)" stroke="var(--surface)" stroke-width="2"/>
       <text class="axis" x="${L}" y="${H - 6}">${dfmt(data[0].t)}</text>
       <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${dfmt(data[data.length - 1].t)}</text>
-      <line id="hl" class="grid" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke-dasharray="3 3" visibility="hidden"/>
-      <circle id="hd" r="4" fill="var(--chart)" visibility="hidden"/>
-      <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent" id="hit"/>
-    </svg><div class="tip" id="tip" hidden></div>`;
+      <rect x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/>
+    </svg>`;
+    box.dataset.w = box.clientWidth;
 
-    const svg = box.querySelector("svg"), tip = box.querySelector("#tip"), hl = box.querySelector("#hl"), hd = box.querySelector("#hd");
-    const move = ev => {
-      const r = svg.getBoundingClientRect();
-      const px = (ev.clientX - r.left) * (W / r.width);
-      let i = 0, best = Infinity;
-      pts.forEach((p, j) => { const dd = Math.abs(p[0] - px); if (dd < best) { best = dd; i = j; } });
-      const [cx, cy] = pts[i];
-      hl.setAttribute("x1", cx); hl.setAttribute("x2", cx); hl.setAttribute("visibility", "visible");
-      hd.setAttribute("cx", cx); hd.setAttribute("cy", cy); hd.setAttribute("visibility", "visible");
-      tip.hidden = false;
-      tip.style.left = Math.min(Math.max(cx * r.width / W, 60), r.width - 60) + "px";
-      tip.style.top = (cy * r.height / H) + "px";
-      tip.textContent = dfmt(data[i].t) + " · " + (m === "tvlUsd" ? usd(data[i][m]) : pct(data[i][m]));
-    };
-    const leave = () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); };
-    svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", leave);
+    const fullDate = d => d.toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" });
+    attachScrub(box, W, H, T, B, pts, i => [fullDate(data[i].t), m === "tvlUsd" ? usd(data[i][m]) : pct(data[i][m])], "var(--chart)");
   }
 
   /* ---------- Link para a página do pool na DEX ---------- */
@@ -1149,6 +1180,7 @@ select#simRef{background:var(--bg)}
       <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">+${Hd} dias</text>
     </svg>
     <p class="note" style="margin-top:6px">Área cinza: onde o preço fica em 8 de cada 10 cenários. Linha tracejada: cenário do meio.</p>`;
+    box.dataset.w = box.clientWidth;
   }
 
   $("#simPrice").addEventListener("click", e => {
@@ -1229,7 +1261,11 @@ select#simRef{background:var(--bg)}
     const b = e.target.closest("button"); if (!b) return;
     state.range = +b.dataset.r; $("#rangeSeg").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); drawChart();
   });
-  window.addEventListener("resize", () => { if (state.pool) (state.view === "sim" ? renderSim() : drawChart()); });
+  window.addEventListener("resize", () => {
+    if (!state.pool) return;
+    if (state.view === "sim") { if (widthChanged($("#simChart"))) renderSim(); }
+    else if (widthChanged($("#chart"))) drawChart();
+  });
 
   const sortSel = $("#sortSel");
   if (![...sortSel.options].some(o => o.value === state.sort)) {
@@ -1699,21 +1735,9 @@ select#simRef{background:var(--bg)}
       <text class="axis" x="${L}" y="${H - 6}">${dfmt(t0)}</text>
       <text class="axis" x="${(L + W - R) / 2}" y="${H - 6}" text-anchor="middle">${dfmt((t0 + t1) / 2)}</text>
       <text class="axis" x="${W - R}" y="${H - 6}" text-anchor="end">${dfmt(t1)}</text>
-      <line id="sHl" class="grid" y1="${T}" y2="${H - B}" stroke-dasharray="3 3" visibility="hidden"/>
-      <circle id="sHd" r="4" fill="${col}" visibility="hidden"/>
-    </svg><div class="tip" id="sTip" hidden></div>`;
-    const svg = box.querySelector("svg"), tip = box.querySelector("#sTip"), hl = box.querySelector("#sHl"), hd = box.querySelector("#sHd");
-    const move = ev => {
-      const r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) * (W / r.width);
-      let i = 0, best = Infinity; xy.forEach((q, j) => { const d = Math.abs(q[0] - px); if (d < best) { best = d; i = j; } });
-      const [cx, cy] = xy[i];
-      hl.setAttribute("x1", cx); hl.setAttribute("x2", cx); hl.setAttribute("visibility", "visible");
-      hd.setAttribute("cx", cx); hd.setAttribute("cy", cy); hd.setAttribute("visibility", "visible");
-      tip.hidden = false; tip.style.left = Math.min(Math.max(cx * r.width / W, 70), r.width - 70) + "px"; tip.style.top = (cy * r.height / H) + "px";
-      tip.textContent = tfmt(pts[i][0]) + " · " + money(pts[i][1]);
-    };
-    svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move);
-    svg.addEventListener("pointerleave", () => { tip.hidden = true; hl.setAttribute("visibility", "hidden"); hd.setAttribute("visibility", "hidden"); });
+    </svg>`;
+    box.dataset.w = box.clientWidth;
+    attachScrub(box, W, H, T, B, xy, i => [tfmt(pts[i][0]), money(pts[i][1])], col);
     $("#sNote").textContent = `Fonte: ${data.src}. ` + (!days && data.partial ? "Sem a chave da Alpha Vantage, o plano grátis da brapi só libera os últimos 3 meses desta ação, então “1 ano” e “Tudo” mostram esse período." : "Preço de fechamento, sem ajuste por dividendos.");
   }
 
@@ -1728,7 +1752,7 @@ select#simRef{background:var(--bg)}
     const b = e.target.closest("button"); if (!b) return;
     stk.range = b.dataset.r; $("#sRange").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b))); showStockRange();
   });
-  window.addEventListener("resize", () => { if (stk.t && (SHORT[stk.range] ? stk.daily : stk.long)) drawStock(); });
+  window.addEventListener("resize", () => { if (stk.t && (SHORT[stk.range] ? stk.daily : stk.long) && widthChanged($("#sChart"))) drawStock(); });
 
   /* App instalável: botão "Instalar app" quando o navegador permite */
   let installEvt = null;
