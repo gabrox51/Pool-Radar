@@ -191,6 +191,11 @@ select{background:var(--surface);border:1px solid var(--line);border-radius:10px
 .pc-go:hover{filter:brightness(1.08)}
 .pc-sub{flex-basis:100%;display:flex;gap:16px;flex-wrap:wrap;font-size:13px}
 .pc-sub a{color:var(--accent);font-weight:600;text-decoration:none}
+.st-ctrls{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:8px}
+.st-ctrls .seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr}
+.st-ctrls .seg button{padding:8px 4px;font-size:13px;white-space:nowrap}
+#stDir button[data-d="up"][aria-pressed="true"]{box-shadow:inset 0 -2px 0 var(--good)}
+#stDir button[data-d="down"][aria-pressed="true"]{box-shadow:inset 0 -2px 0 var(--bad)}
 footer{color:var(--muted);font-size:12.5px;padding-block:10px 40px;border-top:1px solid var(--line)}
 footer a{color:var(--muted)}
 
@@ -333,6 +338,17 @@ select#simRef{background:var(--bg)}
   <div class="seg tabs" id="stSeg">
     <button type="button" data-m="b3" aria-pressed="true">Ibovespa · top 10</button>
     <button type="button" data-m="us" aria-pressed="false">Nasdaq · top 10</button>
+  </div>
+  <div class="st-ctrls">
+    <div class="seg" id="stPer">
+      <button type="button" data-p="1d" aria-pressed="true">24h</button>
+      <button type="button" data-p="7d" aria-pressed="false">7 dias</button>
+      <button type="button" data-p="30d" aria-pressed="false">30 dias</button>
+    </div>
+    <div class="seg" id="stDir">
+      <button type="button" data-d="up" aria-pressed="true">▲ Altas</button>
+      <button type="button" data-d="down" aria-pressed="false">▼ Quedas</button>
+    </div>
   </div>
   <div class="st-keys" id="stKeys" hidden>
     <p>As cotações vêm de dois serviços com plano grátis. Crie uma conta, copie a chave e cole aqui. Ela fica salva só neste aparelho e não vai para o código do site.</p>
@@ -529,6 +545,7 @@ select#simRef{background:var(--bg)}
   const money = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 });
   const pct = v => v == null || !isFinite(v) ? "—" : (Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("pt-BR") : v.toLocaleString("pt-BR", { maximumFractionDigits: 2, minimumFractionDigits: 2 })) + "%";
   const usd = v => v == null || !isFinite(v) ? "—" : money.format(v);
+  const shortMeta = m => String(m || "").replace(/^\s*concentrated\s*-\s*/i, "");
   const pretty = s => (s || "").replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase());
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -660,7 +677,7 @@ select#simRef{background:var(--bg)}
     if (!top.length) { box.innerHTML = `<p class="note">Nenhum pool atende aos critérios agora.</p>`; return; }
     box.innerHTML = top.map(({ p, mean, withFees, n }, i) => `<button class="t5" type="button" data-id="${esc(p.pool)}">
         <span class="t5-top"><span class="rk"><b>#${i + 1}</b> · <span class="chainline">${chainIcon(p.chain)}${esc(p.chain)}</span></span>${pairIcon(p.symbol, "sm")}</span>
-        <span style="min-width:0"><span class="sym" style="display:block">${esc(p.symbol)}</span><span class="sub" style="display:block">${esc(pretty(p.project))}${p.poolMeta ? " · " + esc(p.poolMeta) : ""}</span></span>
+        <span style="min-width:0"><span class="sym" style="display:block">${esc(p.symbol)}</span><span class="sub" style="display:block">${esc(pretty(p.project))}${p.poolMeta ? " · " + esc(shortMeta(p.poolMeta)) : ""}</span></span>
         <span class="big">${pct(mean)}<small>APY de taxas · média 30D</small></span>
         <span class="mini"><span title="Dias com taxas nos últimos 30">${withFees}/${n} dias</span><span>TVL ${usd(p.tvlUsd)}</span></span>
       </button>`).join("");
@@ -693,7 +710,7 @@ select#simRef{background:var(--bg)}
     const list = $("#list");
     if (!rows.length) { list.innerHTML = `<div class="empty">Nenhum pool com esses filtros. Tente reduzir o TVL mínimo ou desligar “Liquidez concentrada”.</div>`; $("#moreBtn").hidden = true; return; }
     list.innerHTML = rows.slice(0, state.shown).map(p => {
-      const fee = p.poolMeta ? `<span class="tag">${esc(p.poolMeta)}</span>` : "";
+      const fee = p.poolMeta ? `<span class="tag">${esc(shortMeta(p.poolMeta))}</span>` : "";
       return `<button class="row" type="button" data-id="${esc(p.pool)}">
         <div class="pool"><div class="pid">${pairIcon(p.symbol)}<div style="min-width:0">
           <div class="sym">${esc(p.symbol)}${fee}</div>
@@ -841,30 +858,94 @@ select#simRef{background:var(--bg)}
     pancakeswap: "https://pancakeswap.finance/liquidity/pools", sushiswap: "https://www.sushi.com/pool", "project-x": "https://www.prjx.com/",
     hyperswap: "https://hyperswap.exchange/", kittenswap: "https://kittenswap.finance/", cetus: "https://app.cetus.zone/liquidity",
     bluefin: "https://trade.bluefin.io/liquidity-pools", curve: "https://www.curve.finance/dex/", balancer: "https://balancer.fi/pools" };
+  /* Endereço do pool → página dele na DEX */
+  function dexUrlFor(proj, chain, addr, isCL, labels) {
+    proj = String(proj || "").toLowerCase(); chain = String(chain || "").toLowerCase();
+    const evm = /^0x[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$/.test(addr || "") ? addr : null;
+    const sol = !evm && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr || "") ? addr : null;
+    const L = (labels || []).map(x => String(x).toLowerCase());
+    if (proj.startsWith("uniswap") && evm && EVM_SLUG[chain]) return `https://app.uniswap.org/explore/pools/${EVM_SLUG[chain]}/${evm}`;
+    if (proj.startsWith("raydium") && sol) {
+      const clmm = L.length ? L.includes("clmm") : isCL;
+      return clmm ? `https://raydium.io/clmm/create-position/?pool_id=${sol}` : `https://raydium.io/liquidity/increase/?mode=add&pool_id=${sol}`;
+    }
+    if (proj.startsWith("orca") && sol) return `https://www.orca.so/pools/${sol}`;
+    if (proj.startsWith("meteora") && sol) return (L.includes("dlmm") || proj.includes("dlmm")) ? `https://app.meteora.ag/dlmm/${sol}` : `https://app.meteora.ag/pools/${sol}`;
+    return null;
+  }
   function poolLinks(p, isCL) {
     const raw = String(p.pool || "");
     const evm = (raw.match(/0x[0-9a-fA-F]{64}|0x[0-9a-fA-F]{40}/) || [])[0];
     const sol = !evm && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(raw.split("-")[0]) ? raw.split("-")[0] : null;
     const addr = evm || sol;
     const chain = String(p.chain || "").toLowerCase(), proj = String(p.project || "").toLowerCase();
-    let dex = null;
-    if (addr) {
-      if (proj.startsWith("uniswap") && evm && EVM_SLUG[chain]) dex = `https://app.uniswap.org/explore/pools/${EVM_SLUG[chain]}/${evm}`;
-      else if (proj.startsWith("raydium") && sol) dex = isCL ? `https://raydium.io/clmm/create-position/?pool_id=${sol}` : `https://raydium.io/liquidity/increase/?mode=add&pool_id=${sol}`;
-      else if (proj.startsWith("orca") && sol) dex = `https://www.orca.so/pools/${sol}`;
-      else if (proj.startsWith("meteora") && sol) dex = proj.includes("dlmm") ? `https://app.meteora.ag/dlmm/${sol}` : `https://app.meteora.ag/pools/${sol}`;
-    }
     const homeKey = Object.keys(DEX_HOME).find(k => proj.startsWith(k));
-    const chart = addr && DS_SLUG[chain] ? `https://dexscreener.com/${DS_SLUG[chain]}/${addr}` : null;
-    return { dex, home: homeKey ? DEX_HOME[homeKey] : null, chart, llama: `https://defillama.com/yields/pool/${encodeURIComponent(raw)}` };
+    return {
+      dex: addr ? dexUrlFor(proj, chain, addr, isCL) : null,
+      home: homeKey ? DEX_HOME[homeKey] : null,
+      chart: addr && DS_SLUG[chain] ? `https://dexscreener.com/${DS_SLUG[chain]}/${addr}` : null,
+      llama: `https://defillama.com/yields/pool/${encodeURIComponent(raw)}`
+    };
   }
-  function renderPoolCard(p, isCL) {
-    const L = poolLinks(p, isCL), name = pretty(String(p.project || "").split("-")[0]);
+
+  /* Quando a DefiLlama não informa o endereço, acha o pool pelo par de tokens no DexScreener */
+  const dsCache = new Map();
+  const projKeyOf = proj => String(proj || "").toLowerCase()
+    .replace(/-(v\d.*|amm.*|clmm.*|cpmm.*|dex.*|dlmm.*|cl|cl-.*|slipstream.*|concentrated.*|whirlpools?.*)$/, "").replace(/[^a-z0-9]/g, "");
+  async function resolvePair(p, isCL) {
+    if (dsCache.has(p.pool)) return dsCache.get(p.pool);
+    const chain = String(p.chain || "").toLowerCase(), ds = DS_SLUG[chain];
+    const toks = (p.underlyingTokens || []).filter(Boolean);
+    if (!ds || toks.length < 2) { dsCache.set(p.pool, null); return null; }
+    const norm = a => ds === "solana" ? String(a || "") : String(a || "").toLowerCase();
+    const t0 = norm(toks[0]), t1 = norm(toks[1]);
+    let pairs = [];
+    try {
+      const r = await fetch(`https://api.dexscreener.com/token-pairs/v1/${ds}/${toks[0]}`);
+      const j = await r.json(); pairs = Array.isArray(j) ? j : (j.pairs || []);
+    } catch (e) { return null; } /* sem cache: tenta de novo na próxima vez */
+    const proj = String(p.project || "").toLowerCase(), pk = projKeyOf(proj);
+    const want = proj.includes("v4") ? "v4" : proj.includes("v3") ? "v3" : proj.includes("v2") ? "v2" : proj.includes("dlmm") ? "dlmm"
+      : (proj.startsWith("raydium") && isCL) ? "clmm" : null;
+    const cands = pairs.filter(x => {
+      const d = String(x.dexId || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const b = norm(x.baseToken?.address), q = norm(x.quoteToken?.address);
+      return d && (d.startsWith(pk) || pk.startsWith(d)) && ((b === t0 && q === t1) || (b === t1 && q === t0));
+    });
+    const score = x => {
+      const labs = (x.labels || []).map(v => String(v).toLowerCase());
+      let sc = Math.abs(Math.log(Math.max(1, x.liquidity?.usd || 1) / Math.max(1, p.tvlUsd || 1)));
+      if (want && !labs.includes(want)) sc += 3;
+      return sc;
+    };
+    cands.sort((a, b) => score(a) - score(b));
+    const best = cands[0] ? { addr: cands[0].pairAddress, labels: cands[0].labels || [], url: cands[0].url } : null;
+    dsCache.set(p.pool, best);
+    return best;
+  }
+
+  function paintPoolCard(p, L, state2) {
+    const name = pretty(String(p.project || "").split("-")[0]);
     const main = L.dex || L.home || L.llama;
-    const what = L.dex ? `Abre este pool na ${esc(name)} para adicionar liquidez.` : L.home ? `Abre a página de pools da ${esc(name)}. Procure por ${esc(p.symbol)}.` : "Abre a página do pool na DefiLlama, com o link para a DEX.";
+    const what = L.dex ? `Abre este pool na ${esc(name)} para adicionar liquidez.`
+      : state2 === "busy" ? `Procurando a página deste pool na ${esc(name)}…`
+      : L.home ? `Não achei o endereço deste pool. Abre a página de pools da ${esc(name)}: procure por ${esc(p.symbol)}.`
+      : "Abre a página do pool na DefiLlama, com o link para a DEX.";
     $("#poolCard").innerHTML = `<div class="pc-txt"><b>Gostou da simulação?</b><span>${what}</span></div>
       <a class="pc-go" href="${esc(main)}" target="_blank" rel="noopener">${L.dex ? "Abrir pool" : "Abrir"} na ${L.dex || L.home ? esc(name) : "DefiLlama"} ↗</a>
       <div class="pc-sub">${L.chart ? `<a href="${esc(L.chart)}" target="_blank" rel="noopener">Gráfico do par no DexScreener ↗</a>` : ""}${main !== L.llama ? `<a href="${esc(L.llama)}" target="_blank" rel="noopener">Ver na DefiLlama ↗</a>` : ""}</div>`;
+  }
+  async function renderPoolCard(p, isCL) {
+    const L = poolLinks(p, isCL);
+    if (L.dex) { paintPoolCard(p, L); return; }
+    const cached = dsCache.get(p.pool);
+    paintPoolCard(p, L, cached === undefined ? "busy" : null);
+    const best = cached !== undefined ? cached : await resolvePair(p, isCL);
+    if (state.pool !== p) return;
+    if (best && best.addr) {
+      const dex = dexUrlFor(p.project, p.chain, best.addr, isCL, best.labels);
+      paintPoolCard(p, { ...L, dex, chart: best.url || L.chart });
+    } else paintPoolCard(p, L);
   }
 
   /* ---------- Simulador de taxas ---------- */
@@ -1235,8 +1316,88 @@ select#simRef{background:var(--bg)}
     return job;
   }
 
+  const stView = { per: "1d", dir: "up" };
+  const P_CACHE_MS = 60 * 60 * 1000;
+  const readC = k => { try { return JSON.parse(localStorage.getItem(k) || "{}") || {}; } catch (e) { return {}; } };
+  const writeC = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+  /* variação entre o fechamento de N dias atrás e o preço de agora */
+  function refChange(pts, last, days) {
+    if (!pts || pts.length < 2) return null;
+    const cut = Date.now() - days * 864e5;
+    let ref = null; for (const q of pts) { if (q[0] <= cut) ref = q[1]; else break; }
+    if (ref == null) ref = pts[0][1];
+    const L = last ?? pts[pts.length - 1][1];
+    return ref > 0 ? (L / ref - 1) * 100 : null;
+  }
+  async function b3Month(t, key) {
+    for (let i = 0; i < 3; i++) {
+      try {
+        const r = await fetch(`https://brapi.dev/api/quote/${t}?range=1mo&interval=1d` + (key && !B3_FREE.has(t) ? `&token=${encodeURIComponent(key)}` : ""));
+        if (r.status === 429 || r.status >= 500) { await sleep(1200 * (i + 1)); continue; }
+        if (!r.ok) return null;
+        const h = (await r.json()).results?.[0]?.historicalDataPrice || [];
+        const pts = h.map(d => [d.date * 1000, +d.close]).filter(q => isFinite(q[1]) && q[1] > 0).sort((a, b) => a[0] - b[0]);
+        return pts.length >= 2 ? pts : null;
+      } catch (e) { await sleep(1200 * (i + 1)); }
+    }
+    return null;
+  }
+  let stLoad = 0;
+  async function periodChanges(mkt, per, rows, alive, progress) {
+    const days = per === "7d" ? 7 : 30, out = {};
+    const list = rows.filter(r => r.px != null);
+    if (mkt === "b3") {
+      const key = lsGet("pr-key-b3"), c = readC("pr-p-b3"); let done = 0;
+      for (const r of list) {
+        if (!alive()) return null;
+        let e = c[r.t];
+        if (!(e && Date.now() - e.ts < P_CACHE_MS)) {
+          const pts = await b3Month(r.t, key);
+          if (pts) { e = { ts: Date.now(), pts }; c[r.t] = e; writeC("pr-p-b3", c); }
+          await sleep(250);
+        }
+        if (e) out[r.t] = refChange(e.pts, r.px, days);
+        progress(out, ++done, list.length);
+      }
+      return { out };
+    }
+    if (per === "7d") { /* Finnhub grátis: retorno de 5 pregões (= 7 dias corridos) */
+      const key = lsGet("pr-key-us"), c = readC("pr-p-us7");
+      await Promise.all(list.map(async r => {
+        let e = c[r.t];
+        if (!(e && Date.now() - e.ts < P_CACHE_MS)) {
+          try {
+            const j = await (await fetch(`https://finnhub.io/api/v1/stock/metric?symbol=${r.t}&metric=all&token=${encodeURIComponent(key)}`)).json();
+            const v = j?.metric?.["5DayPriceReturnDaily"];
+            if (v != null && isFinite(v)) { e = { ts: Date.now(), v: +v }; c[r.t] = e; }
+          } catch (er) {}
+        }
+        if (e) out[r.t] = e.v;
+      }));
+      writeC("pr-p-us7", c);
+      return { out };
+    }
+    /* Nasdaq 30 dias: histórico semanal da Alpha Vantage (o mesmo dos gráficos; máx. 5 consultas por minuto) */
+    if (!lsGet("pr-key-av")) return { needAV: true, out };
+    let done = 0, limit = false;
+    for (const r of list) {
+      if (!alive()) return null;
+      let h = null;
+      try { const x = JSON.parse(localStorage.getItem(`pr-h-us-${r.t}`) || "null"); if (x && Date.now() - x.ts < H_CACHE_MS) h = x; } catch (e) {}
+      if (!h && !limit) {
+        const res = await getHistory(r.t, "us");
+        if (res.err) { if (res.err === "limite") limit = true; } else h = res;
+        if (done < list.length - 1) await sleep(12500);
+      }
+      if (h) out[r.t] = refChange(h.pts, r.px, days);
+      progress(out, ++done, list.length);
+    }
+    return { out, limit };
+  }
+
   async function loadStocks(force) {
-    const mkt = stState.mkt, key = lsGet(mkt === "b3" ? "pr-key-b3" : "pr-key-us");
+    const my = ++stLoad, alive = () => my === stLoad;
+    const mkt = stState.mkt, per = stView.per, key = lsGet(mkt === "b3" ? "pr-key-b3" : "pr-key-us");
     const body = $("#stBody"), note = $("#stNote");
     if (mkt === "us" && !key) {
       body.innerHTML = `<div class="st-empty">Para ver as 10 maiores da Nasdaq, cole uma chave grátis da Finnhub.<button class="btn" type="button" data-open-keys>Colocar chave</button></div>`;
@@ -1244,16 +1405,28 @@ select#simRef{background:var(--bg)}
     }
     if (!body.querySelector(".st-row")) body.innerHTML = `<div class="st-list">${"<div class='skel' style='height:46px'></div>".repeat(6)}</div>`;
     const res = await getQuotes(mkt, force);
-    if (stState.mkt !== mkt) return;
-    renderStocks(res.rows, mkt, res.key, res.ts);
+    if (!alive()) return;
+    if (per === "1d") { renderStocks(res.rows, mkt, res.key, res.ts); return; }
+    const withPer = (out, extra) => res.rows.map(r => ({ ...r, chg: r.px != null ? (out[r.t] ?? (extra === "pending" ? undefined : null)) : null }));
+    renderStocks(withPer({}, "pending"), mkt, res.key, res.ts, `Calculando a variação de ${per === "7d" ? "7" : "30"} dias…`);
+    const pr = await periodChanges(mkt, per, res.rows, alive,
+      (out, d, n) => { if (alive()) renderStocks(withPer(out, "pending"), mkt, res.key, res.ts, `Calculando a variação de ${per === "7d" ? "7" : "30"} dias… ${d}/${n}`); });
+    if (!pr || !alive()) return;
+    if (pr.needAV) {
+      body.innerHTML = `<div class="st-empty">A variação de 30 dias da Nasdaq usa o histórico da Alpha Vantage. Coloque a chave grátis em “Chaves das cotações”.<button class="btn" type="button" data-open-keys>Colocar chave</button></div>`;
+      note.textContent = ""; return;
+    }
+    renderStocks(withPer(pr.out), mkt, res.key, res.ts, pr.limit ? "A Alpha Vantage atingiu o limite grátis (25 por dia); algumas ações ficaram sem a variação de 30 dias." : "");
   }
 
-  function renderStocks(rows, mkt, key, ts) {
+  function renderStocks(rows, mkt, key, ts, msg) {
     const body = $("#stBody"), note = $("#stNote");
-    const ok = rows.filter(r => r.px != null).sort((a, b) => (b.chg ?? -1e9) - (a.chg ?? -1e9));
+    const sgn = stView.dir === "up" ? 1 : -1;
+    const val = r => (r.chg == null || !isFinite(r.chg)) ? -Infinity : sgn * r.chg;
+    const ok = rows.filter(r => r.px != null).sort((a, b) => val(b) - val(a));
     const bad = rows.filter(r => r.px == null);
     const money = (v, c) => v.toLocaleString("pt-BR", { style: "currency", currency: c, minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const chgCell = v => v == null || !isFinite(v) ? `<span class="chg fl">—</span>` :
+    const chgCell = v => v === undefined ? `<span class="chg fl">…</span>` : v == null || !isFinite(v) ? `<span class="chg fl">—</span>` :
       `<span class="chg ${v > 0.005 ? "up" : v < -0.005 ? "dn" : "fl"}">${v > 0 ? "+" : ""}${v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%</span>`;
     let html = ok.length ? `<div class="st-list">${ok.map(r => `<div class="st-row" role="button" tabindex="0" data-t="${esc(r.t)}" data-mkt="${mkt}" aria-label="Ver gráfico de ${esc(r.t)}">
         <div class="st-id">${stockIcon(r.t, mkt)}<div style="min-width:0"><div class="tk">${esc(r.t)}</div><div class="nm">${esc(r.nm)}</div></div></div>
@@ -1267,9 +1440,21 @@ select#simRef{background:var(--bg)}
     }
     body.innerHTML = html;
     const t = new Date(ts).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-    note.textContent = ok.length ? `Ordenadas pela variação do dia. Buscado às ${t}${mkt === "b3" ? " · a B3 no plano grátis tem atraso de até 30 min" : ""}.` +
+    const perTxt = { "1d": "do dia", "7d": "dos últimos 7 dias", "30d": "dos últimos 30 dias" }[stView.per];
+    note.textContent = msg ? msg : ok.length ? `${stView.dir === "up" ? "Maiores altas" : "Maiores quedas"} ${perTxt} entre as 10 maiores do índice. Preço buscado às ${t}${mkt === "b3" ? " · a B3 no plano grátis tem atraso de até 30 min" : ""}.` +
       (bad.length && ok.length ? ` Sem dados agora: ${bad.map(r => r.t).join(", ")}.` : "") : "";
   }
+
+  $("#stPer").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    stView.per = b.dataset.p; $("#stPer").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    loadStocks(false);
+  });
+  $("#stDir").addEventListener("click", e => {
+    const b = e.target.closest("button"); if (!b) return;
+    stView.dir = b.dataset.d; $("#stDir").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+    loadStocks(false);
+  });
 
   function toggleKeys(show) {
     const box = $("#stKeys");
